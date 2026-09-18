@@ -3,8 +3,6 @@ import type { PoleEdytowalne, Trasa } from '@/lib/types'
 import { KATEGORIE_CELU, dataPL, km } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
-const KOLUMNY_EDYTOWALNE: PoleEdytowalne[] = ['cel_wyjazdu', 'skad', 'dokad', 'kierowca']
-
 interface Props {
   trasy: Trasa[]
   zablokowana: boolean
@@ -202,5 +200,3 @@ export function TabelaTras({ trasy, zablokowana, zapisz }: Props) {
     </div>
   )
 }
-
-export { KOLUMNY_EDYTOWALNE }
