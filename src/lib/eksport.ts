@@ -11,8 +11,6 @@ const RAMKA = {
 } as const
 
 function etykietyNaglowka(e: Ewidencja): [string, string][] {
-  const suma = null // wypełniane przez wywołującego
-  void suma
   return [
     ['Nazwa podatnika:', NAZWA_PODATNIKA],
     ['Marka i model pojazdu samochodowego:', e.vehicles.marka_model],
