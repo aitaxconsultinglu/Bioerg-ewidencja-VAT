@@ -1,0 +1,22 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html {
+    font-family: ui-sans-serif, system-ui, 'Segoe UI', Roboto, Arial, sans-serif;
+  }
+  body {
+    @apply bg-slate-50 text-slate-900 antialiased;
+  }
+}
+
+@layer components {
+  /* Komórka tabeli tras - wspólny rytm dla nagłówka i wierszy danych. */
+  .komorka {
+    @apply border border-slate-300 px-2 py-1.5 text-sm align-middle;
+  }
+  .komorka-edytowalna {
+    @apply cursor-text hover:bg-limonka-jasna/60 focus-within:bg-limonka-jasna;
+  }
+}
