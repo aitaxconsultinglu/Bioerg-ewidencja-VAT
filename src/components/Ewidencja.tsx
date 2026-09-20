@@ -2,9 +2,12 @@ import { useCallback, useEffect, useState } from 'react'
 import { ArrowLeft, Download, FileSpreadsheet } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import type { Ewidencja as TEwidencja, PoleEdytowalne, Profil, Trasa, WpisAudytu } from '@/lib/types'
-import { ETYKIETY_STATUSU, KOLORY_STATUSU, dataGodzinaPL, km, licznik, miesiacRok } from '@/lib/format'
+import {
+  ETYKIETY_STATUSU, KOLORY_STATUSU, celDoUzupelnienia,
+  dataGodzinaPL, licznik, miesiacRok, sumaKm,
+} from '@/lib/format'
 import { cn } from '@/lib/utils'
-import { nazwaPliku, pobierzExcel, zbudujPdf } from '@/lib/eksport'
+import { nazwaPliku, pobierzExcel, pobierzPdf, zbudujPdf } from '@/lib/eksport'
 import { TabelaTras } from './TabelaTras'
 import { Button } from './ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog'
@@ -15,13 +18,16 @@ interface Props {
   naListe: () => void
 }
 
+type TrybMasowy = 'wiersze' | 'kierowca' | 'cel'
+
 export function Ewidencja({ logId, profil, naListe }: Props) {
   const [ewidencja, setEwidencja] = useState<TEwidencja | null>(null)
   const [trasy, setTrasy] = useState<Trasa[]>([])
   const [audyt, setAudyt] = useState<WpisAudytu[]>([])
   const [podpis, setPodpis] = useState('')
-  const [trybMasowy, setTrybMasowy] = useState(false)
-  const [kierowcaMasowo, setKierowcaMasowo] = useState('')
+  const [podpisAkceptacji, setPodpisAkceptacji] = useState('')
+  const [tryb, setTryb] = useState<TrybMasowy>('wiersze')
+  const [wartoscMasowa, setWartoscMasowa] = useState('')
   const [oknoPoprawki, setOknoPoprawki] = useState(false)
   const [komentarz, setKomentarz] = useState('')
   const [zajety, setZajety] = useState(false)
@@ -35,11 +41,13 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
     const { data: a } = await supabase
       .from('audit_log').select('*').eq('log_id', logId).order('utworzono', { ascending: false }).limit(50)
 
-    setEwidencja(log as TEwidencja)
+    const e = log as TEwidencja
+    setEwidencja(e)
     setTrasy((t ?? []) as Trasa[])
     setAudyt((a ?? []) as WpisAudytu[])
-    setPodpis((log as TEwidencja)?.podpis_imie_nazwisko ?? profil.imie_nazwisko)
-  }, [logId, profil.imie_nazwisko])
+    setPodpis(e?.podpis_imie_nazwisko ?? (profil.rola === 'kierownik' ? profil.imie_nazwisko : ''))
+    setPodpisAkceptacji(e?.akceptacja_imie_nazwisko ?? (profil.rola === 'ksiegowosc' ? profil.imie_nazwisko : ''))
+  }, [logId, profil.imie_nazwisko, profil.rola])
 
   useEffect(() => { void wczytaj() }, [wczytaj])
 
@@ -50,26 +58,29 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
     if (error) { setBlad(error.message); return }
     setTrasy((p) => p.map((t) => (t.id === tripId ? { ...t, [pole]: wartosc } : t)))
 
-    // Pierwsza zmiana przestawia ewidencję z "wygenerowana" na "w edycji" - dzięki temu
-    // przypomnienie o uzupełnieniu wie, że kierownik już się nią zajął.
     if (ewidencja?.status === 'wygenerowana') {
       await supabase.from('monthly_logs').update({ status: 'w_edycji' }).eq('id', logId)
       setEwidencja((e) => (e ? { ...e, status: 'w_edycji' } : e))
     }
   }
 
-  async function zastosujKierowcePoCalym() {
-    if (!kierowcaMasowo.trim()) return
+  async function zastosujMasowo() {
+    if (!wartoscMasowa.trim()) return
     setZajety(true)
+    const pole: PoleEdytowalne = tryb === 'cel' ? 'cel_wyjazdu' : 'kierowca'
     for (const t of trasy) {
-      if (t.kierowca !== kierowcaMasowo) await zapiszKomorke(t.id, 'kierowca', kierowcaMasowo)
+      // Cel ustalony automatycznie przez potok GPS zostaje nietknięty - masowe
+      // uzupełnianie dotyczy wyłącznie pozycji "(do uzupełnienia przez kierownika)".
+      // Ręczna edycja takiej komórki nadal jest możliwa.
+      if (pole === 'cel_wyjazdu' && !celDoUzupelnienia(t.cel_wyjazdu)) continue
+      if (String(t[pole] ?? '') !== wartoscMasowa) await zapiszKomorke(t.id, pole, wartoscMasowa)
     }
     setZajety(false)
   }
 
   async function wyslijDoAkceptacji() {
     if (!podpis.trim()) { setBlad('Podpisz ewidencję, wpisując imię i nazwisko.'); return }
-    const braki = trasy.filter((t) => !t.kierowca.trim() || t.cel_wyjazdu.startsWith('(do uzupełnienia'))
+    const braki = trasy.filter((t) => !t.kierowca.trim() || celDoUzupelnienia(t.cel_wyjazdu))
     if (braki.length > 0) {
       setBlad(`Uzupełnij cel wyjazdu i kierowcę we wszystkich pozycjach (brakuje w ${braki.length}).`)
       return
@@ -90,21 +101,37 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
 
   async function zaakceptuj() {
     if (!ewidencja) return
+    if (!podpisAkceptacji.trim()) {
+      setBlad('Wpisz imię i nazwisko osoby akceptującej.')
+      return
+    }
     setZajety(true)
     setBlad(null)
     try {
-      const pdf = await zbudujPdf(ewidencja, trasy, false)
+      // PDF archiwalny budujemy z danych PO wpisaniu podpisu akceptacji, żeby podpis
+      // znalazł się w zarchiwizowanym pliku, a nie dopiero przy kolejnym pobraniu.
+      const doArchiwum: TEwidencja = {
+        ...ewidencja,
+        akceptacja_imie_nazwisko: podpisAkceptacji,
+        akceptacja_at: new Date().toISOString(),
+      }
+      const pdf = await zbudujPdf(doArchiwum, trasy)
       const sciezka = `${ewidencja.rok}/${nazwaPliku(ewidencja, 'pdf')}`
       const { error: bladPliku } = await supabase.storage
         .from('ewidencje').upload(sciezka, pdf, { contentType: 'application/pdf', upsert: true })
       if (bladPliku) throw bladPliku
 
-      const { error } = await supabase.from('monthly_logs')
-        .update({ status: 'zaakceptowana', pdf_path: sciezka }).eq('id', logId)
+      const { error } = await supabase.from('monthly_logs').update({
+        status: 'zaakceptowana',
+        pdf_path: sciezka,
+        akceptacja_imie_nazwisko: podpisAkceptacji,
+        akceptacja_at: doArchiwum.akceptacja_at,
+        akceptacja_by: profil.id,
+      }).eq('id', logId)
       if (error) throw error
       await wczytaj()
-    } catch (e: any) {
-      setBlad(e.message ?? String(e))
+    } catch (e) {
+      setBlad(e instanceof Error ? e.message : String(e))
     } finally {
       setZajety(false)
     }
@@ -119,8 +146,6 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
     }).eq('id', logId)
 
     if (!error) {
-      // Komentarz widać w aplikacji natychmiast; e-mail do kierownika wysyła funkcja
-      // brzegowa. Nieudana wysyłka nie może cofnąć samego odesłania do poprawki.
       await supabase.functions.invoke('powiadomienie-poprawka', { body: { log_id: logId } })
         .catch(() => undefined)
     }
@@ -133,7 +158,14 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
 
   async function odblokuj() {
     setZajety(true)
-    await supabase.from('monthly_logs').update({ status: 'w_edycji' }).eq('id', logId)
+    // Odblokowanie czyści podpis akceptacji - po ponownej edycji ewidencja musi zostać
+    // zaakceptowana na nowo, a stary podpis nie może zostać pod zmienionym dokumentem.
+    await supabase.from('monthly_logs').update({
+      status: 'w_edycji',
+      akceptacja_imie_nazwisko: null,
+      akceptacja_at: null,
+      akceptacja_by: null,
+    }).eq('id', logId)
     setZajety(false)
     await wczytaj()
   }
@@ -148,7 +180,10 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
 
   const kierownik = profil.rola === 'kierownik'
   const ksiegowosc = profil.rola === 'ksiegowosc'
-  const mozeWyslac = !zablokowana && ewidencja.status !== 'wyslana_do_akceptacji'
+  const mozeWyslac = kierownik && !zablokowana && ewidencja.status !== 'wyslana_do_akceptacji'
+  // Księgowość może zatwierdzić albo odesłać na każdym etapie poza już zablokowanym -
+  // także po odblokowaniu i ponownej edycji.
+  const ksiegowoscMozeDzialac = ksiegowosc && !zablokowana
 
   return (
     <div className="space-y-5">
@@ -171,10 +206,10 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
           </div>
 
           <div className="flex gap-2">
-            <Button onClick={() => pobierzExcel(ewidencja, trasy)}>
+            <Button onClick={() => void pobierzExcel(ewidencja, trasy)}>
               <FileSpreadsheet className="h-4 w-4" /> Excel
             </Button>
-            <Button onClick={() => void zbudujPdf(ewidencja, trasy, true)}>
+            <Button onClick={() => void pobierzPdf(ewidencja, trasy)}>
               <Download className="h-4 w-4" /> PDF
             </Button>
             {ewidencja.pdf_path && (
@@ -183,24 +218,32 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
           </div>
         </div>
 
-        <dl className="mt-4 grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-4">
+        <dl className="mt-4 grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-5">
           <div>
-            <dt className="text-slate-500">Stan licznika na początek miesiąca</dt>
+            <dt className="text-slate-500">Licznik - początek</dt>
             <dd className="font-medium tabular-nums">{licznik(ewidencja.stan_licznika_poczatek)}</dd>
           </div>
           <div>
-            <dt className="text-slate-500">Stan licznika na koniec miesiąca</dt>
+            <dt className="text-slate-500">Licznik - koniec</dt>
             <dd className="font-medium tabular-nums">{licznik(ewidencja.stan_licznika_koniec)}</dd>
           </div>
           <div>
             <dt className="text-slate-500">Razem km</dt>
-            <dd className="font-medium tabular-nums">{km(trasy.reduce((s, t) => s + Number(t.km), 0))}</dd>
+            <dd className="font-medium tabular-nums">{sumaKm(trasy).toLocaleString('pl-PL')}</dd>
           </div>
           <div>
-            <dt className="text-slate-500">Podpis</dt>
+            <dt className="text-slate-500">Podpis kierownika</dt>
             <dd className="font-medium">
               {ewidencja.podpis_imie_nazwisko
                 ? `${ewidencja.podpis_imie_nazwisko} (${dataGodzinaPL(ewidencja.podpis_at)})`
+                : '—'}
+            </dd>
+          </div>
+          <div>
+            <dt className="text-slate-500">Zatwierdził</dt>
+            <dd className="font-medium">
+              {ewidencja.akceptacja_imie_nazwisko
+                ? `${ewidencja.akceptacja_imie_nazwisko} (${dataGodzinaPL(ewidencja.akceptacja_at)})`
                 : '—'}
             </dd>
           </div>
@@ -219,32 +262,47 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
       {!zablokowana && (
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white p-4">
           <div className="flex rounded-md ring-1 ring-slate-300">
-            <button
-              onClick={() => setTrybMasowy(false)}
-              className={cn('rounded-l-md px-3 py-1.5 text-sm', !trybMasowy && 'bg-limonka font-medium')}
-            >
-              Edycja wiersz po wierszu
-            </button>
-            <button
-              onClick={() => setTrybMasowy(true)}
-              className={cn('rounded-r-md px-3 py-1.5 text-sm', trybMasowy && 'bg-limonka font-medium')}
-            >
-              Jeden kierowca na cały miesiąc
-            </button>
+            {([
+              ['wiersze', 'Edycja wiersz po wierszu'],
+              ['kierowca', 'Jeden kierowca na cały miesiąc'],
+              ['cel', 'Jeden cel wyjazdu na cały miesiąc'],
+            ] as [TrybMasowy, string][]).map(([w, etykieta], i, tab) => (
+              <button
+                key={w}
+                onClick={() => { setTryb(w); setWartoscMasowa('') }}
+                className={cn(
+                  'px-3 py-1.5 text-sm',
+                  i === 0 && 'rounded-l-md',
+                  i === tab.length - 1 && 'rounded-r-md',
+                  tryb === w && 'bg-limonka font-medium',
+                )}
+              >
+                {etykieta}
+              </button>
+            ))}
           </div>
 
-          {trybMasowy && (
+          {tryb !== 'wiersze' && (
             <div className="flex flex-1 items-center gap-2">
               <input
-                value={kierowcaMasowo}
-                onChange={(e) => setKierowcaMasowo(e.target.value)}
-                placeholder="Imię i nazwisko osoby kierującej pojazdem"
+                value={wartoscMasowa}
+                onChange={(e) => setWartoscMasowa(e.target.value)}
+                placeholder={tryb === 'cel'
+                  ? 'Cel wyjazdu do wpisania w puste pozycje'
+                  : 'Imię i nazwisko osoby kierującej pojazdem'}
                 className="min-w-64 flex-1 rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-blekit focus:outline-none"
               />
-              <Button wariant="glowny" disabled={zajety || !kierowcaMasowo.trim()} onClick={zastosujKierowcePoCalym}>
+              <Button wariant="glowny" disabled={zajety || !wartoscMasowa.trim()} onClick={zastosujMasowo}>
                 Zastosuj do wszystkich pozycji
               </Button>
             </div>
+          )}
+
+          {tryb === 'cel' && (
+            <p className="w-full text-xs text-slate-500">
+              Pozycje, w których cel wyjazdu ustalił automat na podstawie danych GPS, zostaną
+              pominięte - nadal można je poprawić ręcznie w tabeli.
+            </p>
           )}
         </div>
       )}
@@ -254,11 +312,11 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
       </div>
 
       <div className="flex flex-wrap items-end justify-between gap-4 rounded-lg border border-slate-200 bg-white p-4">
-        {kierownik && mozeWyslac && (
+        {mozeWyslac && (
           <>
             <div>
               <label className="block text-sm font-medium text-slate-700" htmlFor="podpis">
-                Podpis (imię i nazwisko)
+                Podpis kierownika (imię i nazwisko)
               </label>
               <input
                 id="podpis"
@@ -273,21 +331,35 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
           </>
         )}
 
-        {ksiegowosc && ewidencja.status === 'wyslana_do_akceptacji' && (
-          <div className="flex gap-3">
-            <Button wariant="glowny" disabled={zajety} onClick={zaakceptuj}>
-              Zaakceptuj i wygeneruj PDF
-            </Button>
-            <Button wariant="ostrzezenie" disabled={zajety} onClick={() => setOknoPoprawki(true)}>
-              Odeślij do poprawki
-            </Button>
-          </div>
+        {ksiegowoscMozeDzialac && (
+          <>
+            <div>
+              <label className="block text-sm font-medium text-slate-700" htmlFor="podpis-akceptacji">
+                Zatwierdził (imię i nazwisko osoby akceptującej)
+              </label>
+              <input
+                id="podpis-akceptacji"
+                value={podpisAkceptacji}
+                onChange={(e) => setPodpisAkceptacji(e.target.value)}
+                className="mt-1 w-72 rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blekit focus:outline-none"
+              />
+            </div>
+            <div className="flex gap-3">
+              <Button wariant="glowny" disabled={zajety} onClick={zaakceptuj}>
+                Zaakceptuj i wygeneruj PDF
+              </Button>
+              <Button wariant="ostrzezenie" disabled={zajety} onClick={() => setOknoPoprawki(true)}>
+                Odeślij do poprawki
+              </Button>
+            </div>
+          </>
         )}
 
         {ksiegowosc && zablokowana && (
           <div className="flex items-center gap-3">
             <p className="text-sm text-slate-600">
-              Ewidencja jest zaakceptowana i zablokowana. Aby wprowadzić zmiany, odblokuj ją.
+              Ewidencja jest zaakceptowana i zablokowana. Odblokowanie cofa ją do edycji i
+              usuwa podpis akceptacji - po poprawkach trzeba zatwierdzić ją ponownie.
             </p>
             <Button wariant="akcent" disabled={zajety} onClick={odblokuj}>Odblokuj do edycji</Button>
           </div>

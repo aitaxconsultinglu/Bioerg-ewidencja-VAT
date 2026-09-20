@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PoleEdytowalne, Trasa } from '@/lib/types'
-import { KATEGORIE_CELU, dataPL, km } from '@/lib/format'
+import { celDoUzupelnienia, dataPL, km, sumaKm } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 interface Props {
@@ -27,8 +27,6 @@ export function TabelaTras({ trasy, zablokowana, zapisz }: Props) {
     if (edytowana) inputRef.current?.focus()
   }, [edytowana])
 
-  // Uchwyt wypełniania puszczony gdziekolwiek poza tabelą też musi zakończyć
-  // przeciąganie, inaczej zaznaczenie "przykleja się" do kursora.
   useEffect(() => {
     function koniec() {
       if (przeciaganie.current) {
@@ -72,17 +70,18 @@ export function TabelaTras({ trasy, zablokowana, zapisz }: Props) {
     if (!edytowana) return
     const t = trasy[edytowana.wiersz]
     const obecna = String(t[edytowana.pole] ?? '')
-    if (projekt !== obecna) await zapisz(t.id, edytowana.pole, projekt)
     setEdytowana(null)
+    if (projekt !== obecna) await zapisz(t.id, edytowana.pole, projekt)
   }
 
-  function komorkaEdytowalna(wiersz: number, pole: PoleEdytowalne, klasa?: string) {
+  function komorkaEdytowalna(wiersz: number, pole: PoleEdytowalne) {
     const trasa = trasy[wiersz]
     const wEdycji = edytowana?.wiersz === wiersz && edytowana.pole === pole
     const wZaznaczeniu = zaznaczona(wiersz, pole)
     const wartosc = String(trasa[pole] ?? '')
-    const doUzupelnienia = pole === 'cel_wyjazdu' && wartosc.startsWith('(do uzupełnienia')
-    const pustyKierowca = pole === 'kierowca' && wartosc.trim() === ''
+    const brakuje =
+      (pole === 'cel_wyjazdu' && celDoUzupelnienia(wartosc)) ||
+      (pole === 'kierowca' && wartosc.trim() === '')
 
     return (
       <td
@@ -90,14 +89,14 @@ export function TabelaTras({ trasy, zablokowana, zapisz }: Props) {
           'komorka relative',
           !zablokowana && 'komorka-edytowalna',
           wZaznaczeniu && 'ring-2 ring-inset ring-blekit-ciemny',
-          (doUzupelnienia || pustyKierowca) && 'bg-amber-50',
-          klasa,
+          brakuje && 'bg-amber-50',
         )}
         onMouseDown={(e) => {
           if (zablokowana) return
-          // Bez preventDefault przeciąganie po komórkach uruchamia natywne zaznaczanie
-          // tekstu przeglądarki, które wizualnie zjada zaznaczenie zakresu.
-          if (!wEdycji) e.preventDefault()
+          // preventDefault blokuje natywne zaznaczanie tekstu przy przeciaganiu, ale
+          // NIE wolno go wywolac gdy trwa edycja innej komorki - zabilby zdarzenie
+          // blur, przez co wpisany tekst przepadal bez zapisu.
+          if (!edytowana) e.preventDefault()
           setAktywna({ wiersz, pole })
           setZakres(null)
         }}
@@ -109,36 +108,21 @@ export function TabelaTras({ trasy, zablokowana, zapisz }: Props) {
         onDoubleClick={() => rozpocznijEdycje(wiersz, pole)}
       >
         {wEdycji ? (
-          pole === 'cel_wyjazdu' ? (
-            <select
-              autoFocus
-              value={projekt}
-              onChange={(e) => setProjekt(e.target.value)}
-              onBlur={zatwierdz}
-              className="w-full bg-white text-sm outline-none"
-            >
-              {[...new Set([...KATEGORIE_CELU, projekt])].filter(Boolean).map((k) => (
-                <option key={k} value={k}>{k}</option>
-              ))}
-            </select>
-          ) : (
-            <input
-              ref={inputRef}
-              value={projekt}
-              onChange={(e) => setProjekt(e.target.value)}
-              onBlur={zatwierdz}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter') void zatwierdz()
-                if (e.key === 'Escape') setEdytowana(null)
-              }}
-              className="w-full select-text bg-white text-sm outline-none"
-            />
-          )
+          <input
+            ref={inputRef}
+            value={projekt}
+            onChange={(e) => setProjekt(e.target.value)}
+            onBlur={zatwierdz}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void zatwierdz()
+              if (e.key === 'Escape') setEdytowana(null)
+            }}
+            className="w-full select-text bg-white text-sm outline-none"
+          />
         ) : (
-          <span className={cn(doUzupelnienia && 'italic text-amber-700')}>{wartosc}</span>
+          <span className={cn(brakuje && 'italic text-amber-700')}>{wartosc}</span>
         )}
 
-        {/* Uchwyt wypełniania - przeciągnij w dół, żeby skopiować wartość na kolejne wiersze. */}
         {!zablokowana && !wEdycji && aktywna?.wiersz === wiersz && aktywna.pole === pole && (
           <span
             title="Przeciągnij w dół, aby skopiować wartość"
@@ -155,48 +139,48 @@ export function TabelaTras({ trasy, zablokowana, zapisz }: Props) {
     )
   }
 
-  const suma = trasy.reduce((s, t) => s + Number(t.km), 0)
-
   return (
-    <div className="overflow-x-auto">
-      <table className="w-full select-none border-collapse bg-white">
-        <thead>
-          <tr className="bg-slate-100 text-xs font-semibold">
-            <th className="komorka w-12">Lp.</th>
-            <th className="komorka w-28">Data wyjazdu</th>
-            <th className="komorka w-56">Cel wyjazdu</th>
-            <th className="komorka">Skąd</th>
-            <th className="komorka">Dokąd</th>
-            <th className="komorka w-28">Liczba przejechanych kilometrów</th>
-            <th className="komorka w-52">Imię i nazwisko osoby kierującej pojazdem</th>
-          </tr>
-        </thead>
-        <tbody>
-          {trasy.map((t, i) => (
-            <tr key={t.id}>
-              <td className="komorka text-center text-slate-500">{t.lp}</td>
-              <td className="komorka whitespace-nowrap text-center">{dataPL(t.data_wyjazdu)}</td>
-              {komorkaEdytowalna(i, 'cel_wyjazdu')}
-              {komorkaEdytowalna(i, 'skad')}
-              {komorkaEdytowalna(i, 'dokad')}
-              <td className="komorka text-right tabular-nums">{km(t.km)}</td>
-              {komorkaEdytowalna(i, 'kierowca')}
-            </tr>
-          ))}
-          <tr className="bg-slate-50 font-semibold">
-            <td className="komorka" colSpan={5}>Razem:</td>
-            <td className="komorka text-right tabular-nums">{km(suma)}</td>
-            <td className="komorka" />
-          </tr>
-        </tbody>
-      </table>
-
+    <div>
       {!zablokowana && (
-        <p className="mt-2 text-xs text-slate-500">
+        <p className="mb-2 text-xs text-slate-500">
           Kliknij komórkę, aby ją zaznaczyć, kliknij dwukrotnie, aby edytować. Niebieski
           kwadrat w rogu zaznaczenia przeciągnij w dół, aby skopiować wartość na kolejne wiersze.
         </p>
       )}
+
+      <div className="overflow-x-auto">
+        <table className="w-full select-none border-collapse bg-white">
+          <thead>
+            <tr className="bg-slate-100 text-xs font-semibold">
+              <th className="komorka w-12">Lp.</th>
+              <th className="komorka w-28">Data wyjazdu</th>
+              <th className="komorka w-56">Cel wyjazdu</th>
+              <th className="komorka">Skąd</th>
+              <th className="komorka">Dokąd</th>
+              <th className="komorka w-28">Liczba przejechanych kilometrów</th>
+              <th className="komorka w-52">Imię i nazwisko osoby kierującej pojazdem</th>
+            </tr>
+          </thead>
+          <tbody>
+            {trasy.map((t, i) => (
+              <tr key={t.id}>
+                <td className="komorka text-center text-slate-500">{t.lp}</td>
+                <td className="komorka whitespace-nowrap text-center">{dataPL(t.data_wyjazdu)}</td>
+                {komorkaEdytowalna(i, 'cel_wyjazdu')}
+                {komorkaEdytowalna(i, 'skad')}
+                {komorkaEdytowalna(i, 'dokad')}
+                <td className="komorka text-right tabular-nums">{km(t.km)}</td>
+                {komorkaEdytowalna(i, 'kierowca')}
+              </tr>
+            ))}
+            <tr className="bg-slate-50 font-semibold">
+              <td className="komorka" colSpan={5}>Razem:</td>
+              <td className="komorka text-right tabular-nums">{sumaKm(trasy).toLocaleString('pl-PL')}</td>
+              <td className="komorka" />
+            </tr>
+          </tbody>
+        </table>
+      </div>
     </div>
   )
 }

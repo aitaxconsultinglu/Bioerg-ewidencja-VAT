@@ -34,6 +34,8 @@ export interface Ewidencja {
   stan_licznika_koniec: number | null
   podpis_imie_nazwisko: string | null
   podpis_at: string | null
+  akceptacja_imie_nazwisko: string | null
+  akceptacja_at: string | null
   komentarz_ksiegowosci: string | null
   pdf_path: string | null
   vehicles: Pojazd

@@ -59,7 +59,7 @@ export default function App() {
   return (
     <div className="min-h-screen">
       <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto flex max-w-7xl items-center justify-between px-4 py-3">
+        <div className="mx-auto grid max-w-7xl grid-cols-[1fr_auto_1fr] items-center gap-4 px-4 py-3">
           <div className="flex items-center gap-3">
             <div className="h-8 w-1.5 rounded bg-limonka" />
             <div>
@@ -67,7 +67,12 @@ export default function App() {
               <p className="text-xs text-slate-500">Bioerg Sp. z o.o.</p>
             </div>
           </div>
-          <div className="flex items-center gap-4">
+          <img
+            src={`${import.meta.env.BASE_URL}bioerg-logo.png`}
+            alt="Bioerg"
+            className="h-8 w-auto justify-self-center"
+          />
+          <div className="flex items-center justify-end gap-4">
             <div className="text-right">
               <p className="text-sm font-medium leading-tight">{profil.imie_nazwisko}</p>
               <p className="text-xs text-slate-500">

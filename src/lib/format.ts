@@ -7,8 +7,10 @@ export const MIESIACE_PL = [
 
 export const CEL_DO_UZUPELNIENIA = '(do uzupełnienia przez kierownika)'
 
-/** Trzy kategorie celu wyjazdu ustalone po stronie potoku (trasy_logika.py). */
-export const KATEGORIE_CELU = ['Prace remontowe', 'Auto u mechanika', CEL_DO_UZUPELNIENIA]
+/** Czy cel wyjazdu ustalił potok GPS, czy zostawił go kierownikowi do wpisania. */
+export function celDoUzupelnienia(cel: string | null | undefined) {
+  return !cel || cel.trim() === '' || cel.startsWith('(do uzupełnienia')
+}
 
 export function miesiacRok(rok: number, miesiac: number) {
   return `${MIESIACE_PL[miesiac - 1]} ${rok}`
@@ -26,9 +28,20 @@ export function dataGodzinaPL(iso: string | null) {
   return d.toLocaleString('pl-PL', { dateStyle: 'short', timeStyle: 'short' })
 }
 
+/** Ewidencja prowadzona jest w pełnych kilometrach - wszędzie, łącznie z eksportami. */
 export function km(wartosc: number | null) {
   if (wartosc === null || wartosc === undefined) return ''
-  return wartosc.toLocaleString('pl-PL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
+  return Math.round(Number(wartosc)).toLocaleString('pl-PL')
+}
+
+export function kmLiczba(wartosc: number | null | undefined) {
+  return Math.round(Number(wartosc ?? 0))
+}
+
+/** Suma liczona z wartości JUŻ zaokrąglonych, żeby "Razem" zgadzało się z tym, co
+ *  widać w kolumnie - inaczej wiersz podsumowania potrafi różnić się o 1-2 km. */
+export function sumaKm(trasy: { km: number }[]) {
+  return trasy.reduce((s, t) => s + kmLiczba(t.km), 0)
 }
 
 export function licznik(wartosc: number | null) {
