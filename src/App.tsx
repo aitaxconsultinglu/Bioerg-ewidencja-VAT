@@ -1,8 +1,9 @@
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
 import type { Profil } from '@/lib/types'
 import { Logowanie } from './components/Logowanie'
+import { UstawHaslo } from './components/UstawHaslo'
 import { ListaEwidencji } from './components/ListaEwidencji'
 import { Ewidencja } from './components/Ewidencja'
 import { Button } from './components/ui/button'
@@ -12,37 +13,71 @@ export default function App() {
   const [profil, setProfil] = useState<Profil | null>(null)
   const [ladowanie, setLadowanie] = useState(true)
   const [otwartaEwidencja, setOtwartaEwidencja] = useState<string | null>(null)
+  const [odzyskiwanie, setOdzyskiwanie] = useState(false)
+  const [zmianaHasla, setZmianaHasla] = useState(false)
+
+  const wczytajProfil = useCallback(async (userId: string) => {
+    const { data } = await supabase
+      .from('profiles')
+      .select('id, email, imie_nazwisko, rola, wymaga_zmiany_hasla')
+      .eq('id', userId)
+      .maybeSingle()
+    setProfil(data as Profil | null)
+  }, [])
 
   useEffect(() => {
     supabase.auth.getSession().then(({ data }) => {
       setSesja(data.session)
       setLadowanie(false)
     })
-    const { data: sub } = supabase.auth.onAuthStateChange((_zdarzenie, s) => {
+    const { data: sub } = supabase.auth.onAuthStateChange((zdarzenie, s) => {
+      // Klik w link z maila loguje użytkownika i od razu zgłasza PASSWORD_RECOVERY -
+      // zamiast wpuścić go do aplikacji, pokazujemy ekran ustawienia hasła.
+      if (zdarzenie === 'PASSWORD_RECOVERY') setOdzyskiwanie(true)
       setSesja(s)
       if (!s) {
         setProfil(null)
         setOtwartaEwidencja(null)
+        setOdzyskiwanie(false)
+        setZmianaHasla(false)
       }
     })
     return () => sub.subscription.unsubscribe()
   }, [])
 
   useEffect(() => {
-    if (!sesja) return
-    supabase
-      .from('profiles')
-      .select('id, email, imie_nazwisko, rola')
-      .eq('id', sesja.user.id)
-      .maybeSingle()
-      .then(({ data }) => setProfil(data as Profil | null))
-  }, [sesja])
+    if (sesja) void wczytajProfil(sesja.user.id)
+  }, [sesja, wczytajProfil])
 
   if (ladowanie) {
     return <div className="flex min-h-screen items-center justify-center text-slate-500">Wczytywanie...</div>
   }
 
   if (!sesja) return <Logowanie />
+
+  if (odzyskiwanie || zmianaHasla) {
+    return (
+      <UstawHaslo
+        powod="odzyskiwanie"
+        email={sesja.user.email ?? ''}
+        gotowe={() => {
+          setOdzyskiwanie(false)
+          setZmianaHasla(false)
+          void wczytajProfil(sesja.user.id)
+        }}
+      />
+    )
+  }
+
+  if (profil?.wymaga_zmiany_hasla) {
+    return (
+      <UstawHaslo
+        powod="pierwsze-logowanie"
+        email={sesja.user.email ?? ''}
+        gotowe={() => void wczytajProfil(sesja.user.id)}
+      />
+    )
+  }
 
   if (!profil) {
     return (
@@ -79,6 +114,7 @@ export default function App() {
                 {profil.rola === 'ksiegowosc' ? 'księgowość' : 'kierownik'}
               </p>
             </div>
+            <Button onClick={() => setZmianaHasla(true)}>Zmień hasło</Button>
             <Button onClick={() => supabase.auth.signOut()}>Wyloguj</Button>
           </div>
         </div>

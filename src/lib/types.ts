@@ -12,6 +12,7 @@ export interface Profil {
   email: string
   imie_nazwisko: string
   rola: Rola
+  wymaga_zmiany_hasla: boolean
 }
 
 export interface Pojazd {
