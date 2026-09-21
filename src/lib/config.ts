@@ -12,9 +12,6 @@ export const SUPABASE_ANON_KEY =
 
 export const NAZWA_PODATNIKA = 'Bioerg Sp. z o.o.'
 
-/** Domena firmowa dopisywana automatycznie na ekranie logowania. */
-export const DOMENA_FIRMOWA = '@bioerg.pl'
-
 export const MIN_DLUGOSC_HASLA = 6
 const ZNAKI_SPECJALNE = /[^A-Za-z0-9]/
 
@@ -27,13 +24,6 @@ export function sprawdzHaslo(haslo: string): string | null {
     return 'Hasło musi zawierać co najmniej jeden znak specjalny (np. ! @ # ? -).'
   }
   return null
-}
-
-/** Konta testowe działają na własnych adresach, więc pełny adres z "@" przechodzi
- *  bez zmian, a sama nazwa użytkownika dostaje domenę firmową. */
-export function pelnyAdres(wpisane: string) {
-  const t = wpisane.trim()
-  return t.includes('@') ? t : `${t}${DOMENA_FIRMOWA}`
 }
 
 // Supabase zwraca komunikaty po angielsku, a cały interfejs jest polski. Tłumaczymy

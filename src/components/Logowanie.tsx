@@ -1,25 +1,24 @@
 import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { DOMENA_FIRMOWA, komunikatPL, pelnyAdres } from '@/lib/config'
+import { komunikatPL } from '@/lib/config'
 import { Button } from './ui/button'
 
 export function Logowanie() {
-  const [uzytkownik, setUzytkownik] = useState('')
+  const [adres, setAdres] = useState('')
   const [haslo, setHaslo] = useState('')
   const [resetowanie, setResetowanie] = useState(false)
   const [komunikat, setKomunikat] = useState<string | null>(null)
   const [blad, setBlad] = useState<string | null>(null)
   const [zajety, setZajety] = useState(false)
 
-  const adres = pelnyAdres(uzytkownik)
-  const wlasnaDomena = uzytkownik.includes('@')
-
   async function zaloguj(e: React.FormEvent) {
     e.preventDefault()
     setBlad(null)
     setKomunikat(null)
     setZajety(true)
-    const { error } = await supabase.auth.signInWithPassword({ email: adres, password: haslo })
+    const { error } = await supabase.auth.signInWithPassword({
+      email: adres.trim(), password: haslo,
+    })
     setZajety(false)
     if (error) setBlad('Nieprawidłowy login lub hasło.')
   }
@@ -31,7 +30,7 @@ export function Logowanie() {
     setZajety(true)
     // Link z maila wraca na ten sam adres aplikacji - musi być dopisany w Supabase
     // w Authentication > URL Configuration, inaczej zostanie odrzucony.
-    const { error } = await supabase.auth.resetPasswordForEmail(adres, {
+    const { error } = await supabase.auth.resetPasswordForEmail(adres.trim(), {
       redirectTo: `${window.location.origin}${import.meta.env.BASE_URL}`,
     })
     setZajety(false)
@@ -63,30 +62,20 @@ export function Logowanie() {
           {resetowanie ? 'Odzyskiwanie dostępu' : 'Zaloguj się służbowym adresem e-mail'}
         </p>
 
-        <label className="mt-6 block text-sm font-medium text-slate-700" htmlFor="uzytkownik">
-          Login
+        <label className="mt-6 block text-sm font-medium text-slate-700" htmlFor="adres">
+          Adres e-mail
         </label>
-        <div className="mt-1 flex rounded-md border border-slate-300 focus-within:border-blekit">
-          <input
-            id="uzytkownik"
-            required
-            autoFocus
-            autoComplete="username"
-            placeholder="imie.nazwisko"
-            value={uzytkownik}
-            onChange={(e) => setUzytkownik(e.target.value)}
-            className="w-full rounded-l-md px-3 py-2 text-sm outline-none"
-          />
-          {!wlasnaDomena && (
-            <span className="flex items-center rounded-r-md bg-slate-100 px-3 text-sm text-slate-500">
-              {DOMENA_FIRMOWA}
-            </span>
-          )}
-        </div>
-        <p className="mt-1 text-xs text-slate-500">
-          Wpisz pierwszą literę imienia, kropkę i nazwisko — np. <strong>j.kowalski</strong>.
-          Domena {DOMENA_FIRMOWA} dopisze się sama.
-        </p>
+        <input
+          id="adres"
+          type="email"
+          required
+          autoFocus
+          autoComplete="username"
+          placeholder="j.kowalski@bioerg.pl"
+          value={adres}
+          onChange={(e) => setAdres(e.target.value)}
+          className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blekit focus:outline-none"
+        />
 
         {!resetowanie && (
           <>

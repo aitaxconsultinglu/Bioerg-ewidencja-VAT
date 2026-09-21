@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ArrowLeft, Trash2 } from 'lucide-react'
+import { ArrowLeft, ShieldCheck, Trash2 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
-import { DOMENA_FIRMOWA, komunikatPL, pelnyAdres } from '@/lib/config'
+import { komunikatPL } from '@/lib/config'
 import { dataGodzinaPL } from '@/lib/format'
 import type { Pojazd, Profil, Rola } from '@/lib/types'
 import { cn } from '@/lib/utils'
@@ -14,6 +14,7 @@ interface WierszUzytkownika {
   imie_nazwisko: string
   rola: Rola
   wymaga_zmiany_hasla: boolean
+  chroniony: boolean
   ostatnie_logowanie: string | null
   liczba_pojazdow: number
 }
@@ -28,7 +29,7 @@ export function Uzytkownicy({ profil, naListe }: Props) {
   const [pojazdy, setPojazdy] = useState<Pojazd[]>([])
   const [wybrany, setWybrany] = useState<WierszUzytkownika | null>(null)
   const [doUsuniecia, setDoUsuniecia] = useState<WierszUzytkownika | null>(null)
-  const [nowy, setNowy] = useState({ login: '', imie_nazwisko: '', rola: 'kierownik' as Rola })
+  const [nowy, setNowy] = useState({ email: '', imie_nazwisko: '', rola: 'kierownik' as Rola })
   const [hasloDoPrzekazania, setHasloDoPrzekazania] = useState<{ email: string; haslo: string } | null>(null)
   const [blad, setBlad] = useState<string | null>(null)
   const [zajety, setZajety] = useState(false)
@@ -51,7 +52,7 @@ export function Uzytkownicy({ profil, naListe }: Props) {
     const { data, error } = await supabase.functions.invoke('zarzadzanie-uzytkownikami', {
       body: {
         akcja: 'dodaj',
-        email: pelnyAdres(nowy.login),
+        email: nowy.email.trim(),
         imie_nazwisko: nowy.imie_nazwisko,
         rola: nowy.rola,
       },
@@ -63,7 +64,7 @@ export function Uzytkownicy({ profil, naListe }: Props) {
       return
     }
     setHasloDoPrzekazania({ email: odp!.email!, haslo: odp!.haslo_tymczasowe! })
-    setNowy({ login: '', imie_nazwisko: '', rola: 'kierownik' })
+    setNowy({ email: '', imie_nazwisko: '', rola: 'kierownik' })
     await wczytaj()
   }
 
@@ -106,22 +107,18 @@ export function Uzytkownicy({ profil, naListe }: Props) {
         <h2 className="text-sm font-semibold">Dodaj użytkownika</h2>
         <div className="mt-3 flex flex-wrap items-end gap-3">
           <div>
-            <label className="block text-xs font-medium text-slate-600" htmlFor="nowy-login">Login</label>
-            <div className="mt-1 flex rounded-md border border-slate-300 focus-within:border-blekit">
-              <input
-                id="nowy-login"
-                required
-                placeholder="imie.nazwisko"
-                value={nowy.login}
-                onChange={(e) => setNowy({ ...nowy, login: e.target.value })}
-                className="w-44 rounded-l-md px-3 py-2 text-sm outline-none"
-              />
-              {!nowy.login.includes('@') && (
-                <span className="flex items-center rounded-r-md bg-slate-100 px-2 text-xs text-slate-500">
-                  {DOMENA_FIRMOWA}
-                </span>
-              )}
-            </div>
+            <label className="block text-xs font-medium text-slate-600" htmlFor="nowy-email">
+              Adres e-mail
+            </label>
+            <input
+              id="nowy-email"
+              type="email"
+              required
+              placeholder="j.kowalski@bioerg.pl"
+              value={nowy.email}
+              onChange={(e) => setNowy({ ...nowy, email: e.target.value })}
+              className="mt-1 w-60 rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blekit focus:outline-none"
+            />
           </div>
           <div>
             <label className="block text-xs font-medium text-slate-600" htmlFor="nowy-nazwisko">Imię i nazwisko</label>
@@ -178,7 +175,16 @@ export function Uzytkownicy({ profil, naListe }: Props) {
                 </td>
                 <td className="px-4 py-3 text-slate-600">{u.email}</td>
                 <td className="px-4 py-3">
-                  {u.rola === 'ksiegowosc' ? 'księgowość' : 'kierownik'}
+                  {u.chroniony ? (
+                    <span
+                      title="Konto administratora - nie można go usunąć ani zmienić mu roli"
+                      className="inline-flex items-center gap-1 rounded-full bg-limonka-jasna px-2.5 py-0.5 text-xs font-medium text-limonka-ciemna ring-1 ring-limonka"
+                    >
+                      <ShieldCheck className="h-3 w-3" /> administrator
+                    </span>
+                  ) : (
+                    u.rola === 'ksiegowosc' ? 'księgowość' : 'kierownik'
+                  )}
                 </td>
                 <td className="px-4 py-3 text-right tabular-nums">
                   {u.rola === 'ksiegowosc' ? 'wszystkie' : u.liczba_pojazdow}
@@ -197,7 +203,10 @@ export function Uzytkownicy({ profil, naListe }: Props) {
                     )}
                     <Button
                       wariant="ostrzezenie"
-                      disabled={u.id === profil.id}
+                      disabled={u.id === profil.id || u.chroniony}
+                      title={u.chroniony
+                        ? 'Konta administratora nie można usunąć'
+                        : u.id === profil.id ? 'Nie możesz usunąć własnego konta' : 'Usuń konto'}
                       onClick={() => setDoUsuniecia(u)}
                     >
                       <Trash2 className="h-4 w-4" />
