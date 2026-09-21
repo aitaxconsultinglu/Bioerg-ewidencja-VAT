@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react'
-import { ArrowLeft, ShieldCheck, Trash2 } from 'lucide-react'
+import { ArrowLeft, KeyRound, ShieldCheck, Trash2 } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import { komunikatPL } from '@/lib/config'
 import { dataGodzinaPL } from '@/lib/format'
@@ -29,6 +29,7 @@ export function Uzytkownicy({ profil, naListe }: Props) {
   const [pojazdy, setPojazdy] = useState<Pojazd[]>([])
   const [wybrany, setWybrany] = useState<WierszUzytkownika | null>(null)
   const [doUsuniecia, setDoUsuniecia] = useState<WierszUzytkownika | null>(null)
+  const [doResetu, setDoResetu] = useState<WierszUzytkownika | null>(null)
   const [nowy, setNowy] = useState({ email: '', imie_nazwisko: '', rola: 'kierownik' as Rola })
   const [hasloDoPrzekazania, setHasloDoPrzekazania] = useState<{ email: string; haslo: string } | null>(null)
   const [blad, setBlad] = useState<string | null>(null)
@@ -65,6 +66,24 @@ export function Uzytkownicy({ profil, naListe }: Props) {
     }
     setHasloDoPrzekazania({ email: odp!.email!, haslo: odp!.haslo_tymczasowe! })
     setNowy({ email: '', imie_nazwisko: '', rola: 'kierownik' })
+    await wczytaj()
+  }
+
+  async function resetujHaslo() {
+    if (!doResetu) return
+    setZajety(true)
+    setBlad(null)
+    const { data, error } = await supabase.functions.invoke('zarzadzanie-uzytkownikami', {
+      body: { akcja: 'resetuj', user_id: doResetu.id },
+    })
+    setZajety(false)
+    const odp = data as { error?: string; haslo_tymczasowe?: string; email?: string } | null
+    if (error || odp?.error) {
+      setBlad(komunikatPL(odp?.error ?? error?.message ?? 'Nie udało się zresetować hasła.'))
+    } else {
+      setHasloDoPrzekazania({ email: odp!.email!, haslo: odp!.haslo_tymczasowe! })
+    }
+    setDoResetu(null)
     await wczytaj()
   }
 
@@ -202,6 +221,14 @@ export function Uzytkownicy({ profil, naListe }: Props) {
                       </Button>
                     )}
                     <Button
+                      wariant="akcent"
+                      title="Nadaj nowe hasło tymczasowe"
+                      disabled={zajety}
+                      onClick={() => setDoResetu(u)}
+                    >
+                      <KeyRound className="h-4 w-4" />
+                    </Button>
+                    <Button
                       wariant="ostrzezenie"
                       disabled={u.id === profil.id || u.chroniony}
                       title={u.chroniony
@@ -263,10 +290,10 @@ export function Uzytkownicy({ profil, naListe }: Props) {
         onOpenChange={(o) => !o && setHasloDoPrzekazania(null)}
       >
         <DialogContent>
-          <DialogTitle>Konto utworzone</DialogTitle>
+          <DialogTitle>Hasło tymczasowe</DialogTitle>
           <DialogDescription>
             Przekaż te dane pracownikowi. <strong>Hasło pokazujemy tylko teraz</strong> - nie
-            da się go później odczytać, można je jedynie zresetować.
+            da się go później odczytać, można je jedynie zresetować ponownie.
           </DialogDescription>
           <div className="mt-4 space-y-2 rounded-md bg-slate-50 p-4 font-mono text-sm">
             <div><span className="text-slate-500">Login:</span> {hasloDoPrzekazania?.email}</div>
@@ -275,6 +302,22 @@ export function Uzytkownicy({ profil, naListe }: Props) {
           <div className="mt-4 flex justify-end">
             <Button wariant="glowny" onClick={() => setHasloDoPrzekazania(null)}>
               Zapisałem, zamknij
+            </Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={!!doResetu} onOpenChange={(o) => !o && setDoResetu(null)}>
+        <DialogContent>
+          <DialogTitle>Zresetować hasło: {doResetu?.imie_nazwisko}?</DialogTitle>
+          <DialogDescription>
+            Dotychczasowe hasło przestanie działać. Otrzymasz nowe hasło tymczasowe do
+            przekazania tej osobie — przy najbliższym logowaniu będzie musiała ustawić własne.
+          </DialogDescription>
+          <div className="mt-4 flex justify-end gap-2">
+            <Button onClick={() => setDoResetu(null)}>Anuluj</Button>
+            <Button wariant="glowny" disabled={zajety} onClick={() => void resetujHaslo()}>
+              Resetuj hasło
             </Button>
           </div>
         </DialogContent>

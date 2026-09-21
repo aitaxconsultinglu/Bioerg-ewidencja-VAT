@@ -77,6 +77,25 @@ Deno.serve(async (req) => {
     return odpowiedz({ ok: true, email: adres, haslo_tymczasowe: haslo })
   }
 
+  if (akcja === 'resetuj') {
+    if (!user_id) return odpowiedz({ error: 'Brak identyfikatora konta.' }, 400)
+
+    const { data: konto } = await serwisowy
+      .from('profiles').select('email').eq('id', user_id).single()
+    if (!konto) return odpowiedz({ error: 'Nie znaleziono konta.' }, 404)
+
+    // Reset dziala takze dla kont administratorow - zapomniane haslo to nie to samo
+    // co usuniecie konta, a administrator tez moze je zgubic.
+    const haslo = hasloTymczasowe()
+    const { error } = await serwisowy.auth.admin.updateUserById(user_id, { password: haslo })
+    if (error) return odpowiedz({ error: error.message }, 400)
+
+    // Haslo nadane przez ksiegowosc jest tymczasowe - uzytkownik musi ustawic wlasne
+    // przy najblizszym logowaniu, zeby nikt poza nim go nie znal.
+    await serwisowy.from('profiles').update({ wymaga_zmiany_hasla: true }).eq('id', user_id)
+    return odpowiedz({ ok: true, email: konto.email, haslo_tymczasowe: haslo })
+  }
+
   if (akcja === 'usun') {
     if (!user_id) return odpowiedz({ error: 'Brak identyfikatora konta.' }, 400)
     if (user_id === user.id) {
