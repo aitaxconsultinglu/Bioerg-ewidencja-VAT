@@ -160,16 +160,35 @@ export function TabelaTras({ trasy, zablokowana, zapisz }: Props) {
               <th className="komorka w-28">Liczba przejechanych kilometrów</th>
               <th className="komorka w-52">Imię i nazwisko osoby kierującej pojazdem</th>
             </tr>
+            <tr className="bg-slate-50 text-[10px] uppercase tracking-wide text-slate-400">
+              <td className="komorka-tylko-odczyt border border-slate-300 px-2 py-0.5 text-center">z GPS</td>
+              <td className="komorka-tylko-odczyt border border-slate-300 px-2 py-0.5 text-center">z GPS</td>
+              <td className="border border-slate-300 px-2 py-0.5 text-center text-limonka-ciemna">do uzupełnienia</td>
+              <td className="border border-slate-300 px-2 py-0.5 text-center text-limonka-ciemna">do uzupełnienia</td>
+              <td className="border border-slate-300 px-2 py-0.5 text-center text-limonka-ciemna">do uzupełnienia</td>
+              <td className="komorka-tylko-odczyt border border-slate-300 px-2 py-0.5 text-center">z GPS</td>
+              <td className="border border-slate-300 px-2 py-0.5 text-center text-limonka-ciemna">do uzupełnienia</td>
+            </tr>
           </thead>
           <tbody>
             {trasy.map((t, i) => (
               <tr key={t.id}>
-                <td className="komorka text-center text-slate-500">{t.lp}</td>
-                <td className="komorka whitespace-nowrap text-center">{dataPL(t.data_wyjazdu)}</td>
+                <td className="komorka komorka-tylko-odczyt text-center">{t.lp}</td>
+                <td
+                  title="Data pochodzi z danych GPS i nie podlega edycji"
+                  className="komorka komorka-tylko-odczyt whitespace-nowrap text-center"
+                >
+                  {dataPL(t.data_wyjazdu)}
+                </td>
                 {komorkaEdytowalna(i, 'cel_wyjazdu')}
                 {komorkaEdytowalna(i, 'skad')}
                 {komorkaEdytowalna(i, 'dokad')}
-                <td className="komorka text-right tabular-nums">{km(t.km)}</td>
+                <td
+                  title="Liczba kilometrów pochodzi z danych GPS i nie podlega edycji"
+                  className="komorka komorka-tylko-odczyt text-right tabular-nums"
+                >
+                  {km(t.km)}
+                </td>
                 {komorkaEdytowalna(i, 'kierowca')}
               </tr>
             ))}
