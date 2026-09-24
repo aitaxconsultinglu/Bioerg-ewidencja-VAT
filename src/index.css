@@ -19,4 +19,9 @@
   .komorka-edytowalna {
     @apply cursor-text hover:bg-limonka-jasna/60 focus-within:bg-limonka-jasna;
   }
+  /* Kolumny pochodzące wprost z danych GPS. Nie da się ich edytować - szare tło mówi
+     o tym wprost, zamiast zostawiać użytkownika z pytaniem, czemu klik nie działa. */
+  .komorka-tylko-odczyt {
+    @apply cursor-not-allowed bg-slate-50 text-slate-600;
+  }
 }

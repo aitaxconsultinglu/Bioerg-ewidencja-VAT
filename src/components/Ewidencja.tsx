@@ -69,11 +69,15 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
     setZajety(true)
     const pole: PoleEdytowalne = tryb === 'cel' ? 'cel_wyjazdu' : 'kierowca'
     for (const t of trasy) {
-      // Cel ustalony automatycznie przez potok GPS zostaje nietknięty - masowe
-      // uzupełnianie dotyczy wyłącznie pozycji "(do uzupełnienia przez kierownika)".
-      // Ręczna edycja takiej komórki nadal jest możliwa.
-      if (pole === 'cel_wyjazdu' && !celDoUzupelnienia(t.cel_wyjazdu)) continue
-      if (String(t[pole] ?? '') !== wartoscMasowa) await zapiszKomorke(t.id, pole, wartoscMasowa)
+      // Uzupełnianie masowe NIGDY nie nadpisuje tego, co już jest w komórce - ani
+      // celu ustalonego przez potok GPS, ani nazwiska wpisanego wcześniej ręcznie.
+      // Wypełnia wyłącznie puste pozycje, więc jest bezpieczne do użycia w dowolnym
+      // momencie, także po ręcznym uzupełnieniu kilku pierwszych wierszy.
+      const juzUzupelnione = pole === 'cel_wyjazdu'
+        ? !celDoUzupelnienia(t.cel_wyjazdu)
+        : String(t[pole] ?? '').trim() !== ''
+      if (juzUzupelnione) continue
+      await zapiszKomorke(t.id, pole, wartoscMasowa)
     }
     setZajety(false)
   }
@@ -289,7 +293,7 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
                 onChange={(e) => setWartoscMasowa(e.target.value)}
                 placeholder={tryb === 'cel'
                   ? 'Cel wyjazdu do wpisania w puste pozycje'
-                  : 'Imię i nazwisko osoby kierującej pojazdem'}
+                  : 'Kierowca do wpisania w puste pozycje'}
                 className="min-w-64 flex-1 rounded-md border border-slate-300 px-3 py-1.5 text-sm focus:border-blekit focus:outline-none"
               />
               <Button wariant="glowny" disabled={zajety || !wartoscMasowa.trim()} onClick={zastosujMasowo}>
@@ -298,10 +302,11 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
             </div>
           )}
 
-          {tryb === 'cel' && (
+          {tryb !== 'wiersze' && (
             <p className="w-full text-xs text-slate-500">
-              Pozycje, w których cel wyjazdu ustalił automat na podstawie danych GPS, zostaną
-              pominięte - nadal można je poprawić ręcznie w tabeli.
+              Uzupełnione zostaną wyłącznie <strong>puste</strong> pozycje. To, co już
+              wpisałeś ręcznie{tryb === 'cel' && ' lub ustalił automat z danych GPS'}, zostanie
+              nietknięte - w razie potrzeby popraw to bezpośrednio w tabeli.
             </p>
           )}
         </div>
