@@ -36,11 +36,31 @@ Deno.serve(async () => {
 
   const prog = new Date(Date.now() - ODSTEP_DNI * 86_400_000)
 
+  // Ponaglamy WYLACZNIE najnowszy zaimportowany okres. Bez tego ograniczenia zadanie
+  // sciagaloby kierownika takze za miesiace sprzed pol roku, mieszajac je w jednym
+  // mailu z biezacym - a zalegly, stary miesiac to sprawa do wyjasnienia z ksiegowoscia,
+  // nie do codziennego ponaglania automatem.
+  const { data: najnowszy } = await supabase
+    .from('monthly_logs')
+    .select('rok, miesiac')
+    .order('rok', { ascending: false })
+    .order('miesiac', { ascending: false })
+    .limit(1)
+    .maybeSingle()
+
+  if (!najnowszy) {
+    return new Response(JSON.stringify({ wyslano: 0, powod: 'brak jakichkolwiek ewidencji' }), {
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
   // Statusy oznaczajace "kierownik jeszcze tego nie oddal". Ewidencja wyslana do
   // akceptacji albo juz zaakceptowana wypada z przypomnien automatycznie.
   const { data: ewidencje, error } = await supabase
     .from('monthly_logs')
     .select('id, rok, miesiac, status, last_reminder_sent_at, powiadomienie_wyslane_at, utworzono, vehicles(nr_rejestracyjny, kierownik_id)')
+    .eq('rok', najnowszy.rok)
+    .eq('miesiac', najnowszy.miesiac)
     .in('status', ['wygenerowana', 'w_edycji', 'odeslana_do_poprawki'])
 
   if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500 })
@@ -119,7 +139,9 @@ Deno.serve(async () => {
   }
 
   await klient.close()
-  return new Response(JSON.stringify({ wyslano, termin }), {
+  return new Response(JSON.stringify({
+    wyslano, termin, okres: `${najnowszy.rok}-${String(najnowszy.miesiac).padStart(2, '0')}`,
+  }), {
     headers: { 'Content-Type': 'application/json' },
   })
 })
