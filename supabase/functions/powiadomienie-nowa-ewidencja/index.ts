@@ -14,6 +14,33 @@ const MIESIACE_PL = [
 
 const ADRES_APLIKACJI = 'https://aitaxconsultinglu.github.io/Bioerg-ewidencja-VAT/'
 
+/** Jedna tresc dla kierownikow i dla ksiegowosci - ta sama wiadomosc o tym, ze
+ *  ewidencja zostala wygenerowana i czeka na uzupelnienie. Rozni je wylacznie zakres
+ *  pojazdow: kierownik dostaje swoje, ksiegowosc caly tabor z danego miesiaca. */
+function trescPowiadomienia(imieNazwisko: string, okres: string, pojazdy: string[]) {
+  return [
+    `Dzień dobry${imieNazwisko ? ', ' + imieNazwisko : ''},`,
+    '',
+    `ewidencja przebiegu za ${okres} została wygenerowana z danych GPS i czeka na`,
+    'uzupełnienie oraz weryfikację.',
+    '',
+    pojazdy.length === 1 ? 'Dotyczy pojazdu:' : `Dotyczy pojazdów (${pojazdy.length}):`,
+    ...pojazdy.map((r) => `  - ${r}`),
+    '',
+    'Do uzupełnienia w każdej pozycji:',
+    '  - Cel wyjazdu',
+    '  - Imię i nazwisko osoby kierującej pojazdem',
+    '',
+    'Pozostałe dane (data, trasa, liczba kilometrów) pochodzą z GPS i są już wypełnione.',
+    'Po uzupełnieniu prosimy podpisać ewidencję i wysłać ją do akceptacji.',
+    '',
+    `Aplikacja: ${ADRES_APLIKACJI}`,
+    '',
+    'Pozdrawiamy,',
+    'AI Tax Consulting Sp. z o.o.',
+  ].join('\n')
+}
+
 Deno.serve(async (req) => {
   let rok: number | undefined
   let miesiac: number | undefined
@@ -71,6 +98,7 @@ Deno.serve(async (req) => {
 
   const nadawca = Deno.env.get('EMAIL_USER')!
   const okres = `${MIESIACE_PL[miesiac - 1]} ${rok}`
+  const temat = `Ewidencja przebiegu pojazdu za ${okres} jest gotowa do uzupełnienia`
   let doKierownikow = 0
   let doKsiegowosci = 0
 
@@ -84,28 +112,8 @@ Deno.serve(async (req) => {
       await klient.send({
         from: nadawca,
         to: profil.email,
-        subject: `Ewidencja przebiegu pojazdu za ${okres} jest gotowa do uzupełnienia`,
-        content: [
-          `Dzień dobry${profil.imie_nazwisko ? ', ' + profil.imie_nazwisko : ''},`,
-          '',
-          `ewidencja przebiegu za ${okres} została wygenerowana z danych GPS i czeka na`,
-          'uzupełnienie oraz weryfikację.',
-          '',
-          lista.length === 1 ? 'Dotyczy pojazdu:' : 'Dotyczy pojazdów:',
-          ...lista.map((r) => `  - ${r}`),
-          '',
-          'Prosimy o uzupełnienie dwóch kolumn:',
-          '  - Cel wyjazdu',
-          '  - Imię i nazwisko osoby kierującej pojazdem',
-          '',
-          'Pozostałe dane (data, trasa, liczba kilometrów) pochodzą z GPS i są już wypełnione.',
-          'Po uzupełnieniu prosimy podpisać ewidencję i wysłać ją do akceptacji.',
-          '',
-          `Aplikacja: ${ADRES_APLIKACJI}`,
-          '',
-          'Pozdrawiamy,',
-          'AI Tax Consulting Sp. z o.o.',
-        ].join('\n'),
+        subject: temat,
+        content: trescPowiadomienia(profil.imie_nazwisko ?? '', okres, lista),
       })
       await supabase.from('monthly_logs')
         .update({ powiadomienie_wyslane_at: new Date().toISOString() }).in('id', wpis.logi)
@@ -115,7 +123,14 @@ Deno.serve(async (req) => {
     }
   }
 
-  // Ksiegowosc dostaje jedno zbiorcze zawiadomienie, ze miesiac zostal zaimportowany.
+  // Ksiegowosc dostaje DOKLADNIE te sama wiadomosc co kierownicy - tyle ze o calym
+  // taborze z danego miesiaca, bo nie ma przypisanych wlasnych pojazdow.
+  const wszystkiePojazdy = [...new Set(
+    ewidencje
+      .map((e) => (e as unknown as { vehicles: { nr_rejestracyjny: string } }).vehicles?.nr_rejestracyjny)
+      .filter(Boolean),
+  )].sort()
+
   const { data: ksiegowi } = await supabase
     .from('profiles').select('email, imie_nazwisko').eq('rola', 'ksiegowosc')
 
@@ -125,21 +140,8 @@ Deno.serve(async (req) => {
       await klient.send({
         from: nadawca,
         to: k.email,
-        subject: `Ewidencja przebiegu pojazdów za ${okres} - zaimportowana`,
-        content: [
-          'Dzień dobry,',
-          '',
-          `ewidencja przebiegu za ${okres} została wygenerowana z danych GPS i udostępniona`,
-          `kierownikom do uzupełnienia. Dotyczy ${ewidencje.length} pojazdów.`,
-          '',
-          'Kierownicy zostali poproszeni o uzupełnienie celu wyjazdu oraz imienia i nazwiska',
-          'osoby kierującej pojazdem, a następnie o wysłanie ewidencji do akceptacji.',
-          '',
-          `Aplikacja: ${ADRES_APLIKACJI}`,
-          '',
-          'Pozdrawiamy,',
-          'AI Tax Consulting Sp. z o.o.',
-        ].join('\n'),
+        subject: temat,
+        content: trescPowiadomienia(k.imie_nazwisko ?? '', okres, wszystkiePojazdy),
       })
       doKsiegowosci++
     } catch (err) {
