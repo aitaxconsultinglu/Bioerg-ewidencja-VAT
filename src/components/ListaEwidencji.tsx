@@ -46,9 +46,12 @@ export function ListaEwidencji({ profil, otworz }: Props) {
   const [oknoAkceptacji, setOknoAkceptacji] = useState(false)
 
   async function wczytaj() {
+    // Osoba odpowiedzialna za pojazd dociągana przez klucz obcy vehicles.kierownik_id.
+    // Kierownik zobaczy tu wyłącznie siebie (polityka RLS na profiles), ale widzi też
+    // tylko własne pojazdy, więc kolumna i tak jest dla niego wypełniona.
     const { data } = await supabase
       .from('monthly_logs')
-      .select('*, vehicles(*), trips(km)')
+      .select('*, vehicles(*, kierownik:profiles!vehicles_kierownik_id_fkey(imie_nazwisko)), trips(km)')
       .order('rok', { ascending: false })
       .order('miesiac', { ascending: false })
 
@@ -219,6 +222,7 @@ export function ListaEwidencji({ profil, otworz }: Props) {
               <tr>
                 <th className="px-4 py-3">Pojazd</th>
                 <th className="px-4 py-3">Marka i model</th>
+                <th className="px-4 py-3">Kierownik</th>
                 <th className="px-4 py-3">Miesiąc</th>
                 <th className="px-4 py-3 text-right">Razem km</th>
                 <th className="px-4 py-3">Status</th>
@@ -229,6 +233,10 @@ export function ListaEwidencji({ profil, otworz }: Props) {
                 <tr key={p.id} onClick={() => otworz(p.id)} className="cursor-pointer hover:bg-slate-50">
                   <td className="px-4 py-3 font-medium">{p.vehicles.nr_rejestracyjny}</td>
                   <td className="px-4 py-3 text-slate-600">{p.vehicles.marka_model}</td>
+                  <td className="px-4 py-3">
+                    {p.vehicles.kierownik?.imie_nazwisko
+                      ?? <span className="text-amber-700">brak przypisania</span>}
+                  </td>
                   <td className="px-4 py-3">{miesiacRok(p.rok, p.miesiac)}</td>
                   <td className="px-4 py-3 text-right tabular-nums">{p.suma_km.toLocaleString('pl-PL')}</td>
                   <td className="px-4 py-3">
