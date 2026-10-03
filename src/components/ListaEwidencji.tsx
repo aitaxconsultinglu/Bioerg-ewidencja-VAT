@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Download, FileSpreadsheet } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import type { Ewidencja as TEwidencja, Profil, Trasa } from '@/lib/types'
@@ -14,20 +14,32 @@ interface Props {
 }
 
 type Pozycja = TEwidencja & { suma_km: number }
+interface Okres { rok: number; miesiac: number }
 
-/** Lista pokazuje trzy ostatnie okresy - tyle, ile realnie bywa w obiegu naraz.
- *  Wcześniejsze miesiące zostają w bazie i w archiwum PDF, ale nie zaśmiecają widoku. */
+/** Ile miesięcy trzymamy w zakładkach - tyle realnie bywa naraz w obiegu. */
 const WIDOCZNYCH_OKRESOW = 3
 
-/** Ewidencja w aplikacji zaczyna się od września 2026. Sierpień był miesiącem
- *  testowym i świadomie nie jest pokazywany. */
-const PIERWSZY_OKRES = { rok: 2026, miesiac: 9 }
-
 const klucz = (rok: number, miesiac: number) => rok * 12 + miesiac
-const PROG = klucz(PIERWSZY_OKRES.rok, PIERWSZY_OKRES.miesiac)
+
+/** Bieżący miesiąc i dwa poprzednie, od najstarszego. Liczone z kalendarza, a nie z
+ *  danych - dzięki temu zakładka bieżącego miesiąca istnieje, zanim potok go pobierze,
+ *  i widać wprost, że ewidencja jeszcze nie powstała. */
+function ostatnieOkresy(ile: number): Okres[] {
+  const dzis = new Date()
+  const lista: Okres[] = []
+  for (let i = ile - 1; i >= 0; i--) {
+    const d = new Date(dzis.getFullYear(), dzis.getMonth() - i, 1)
+    lista.push({ rok: d.getFullYear(), miesiac: d.getMonth() + 1 })
+  }
+  return lista
+}
 
 export function ListaEwidencji({ profil, otworz }: Props) {
+  const okresy = useMemo(() => ostatnieOkresy(WIDOCZNYCH_OKRESOW), [])
   const [pozycje, setPozycje] = useState<Pozycja[]>([])
+  const [aktywny, setAktywny] = useState<number>(
+    klucz(okresy[okresy.length - 1].rok, okresy[okresy.length - 1].miesiac),
+  )
   const [ladowanie, setLadowanie] = useState(true)
   const [postep, setPostep] = useState<string | null>(null)
   const [blad, setBlad] = useState<string | null>(null)
@@ -44,40 +56,37 @@ export function ListaEwidencji({ profil, otworz }: Props) {
       ...(p as unknown as TEwidencja),
       suma_km: sumaKm(((p as { trips?: { km: number }[] }).trips) ?? []),
     }))
-
-    // Trzy najnowsze okresy, nie wcześniej niż wrzesień 2026. Filtrujemy po stronie
-    // przeglądarki, bo PostgREST nie porówna pary (rok, miesiąc) jednym warunkiem,
-    // a zbiór jest mały - 23 pojazdy na miesiąc.
-    const okresy = [...new Set(wszystkie.map((p) => klucz(p.rok, p.miesiac)))]
-      .filter((k) => k >= PROG)
-      .sort((a, b) => b - a)
-      .slice(0, WIDOCZNYCH_OKRESOW)
-
-    setPozycje(wszystkie.filter((p) => okresy.includes(klucz(p.rok, p.miesiac))))
+    const widoczne = new Set(okresy.map((o) => klucz(o.rok, o.miesiac)))
+    setPozycje(wszystkie.filter((p) => widoczne.has(klucz(p.rok, p.miesiac))))
     setLadowanie(false)
   }
 
   useEffect(() => { void wczytaj() }, [])
 
+  // Bieżący miesiąc bywa pusty do czasu importu - wtedy otwieramy najnowszą zakładkę,
+  // w której faktycznie coś jest, zamiast witać użytkownika pustym ekranem. Dzieje się
+  // to TYLKO raz, po wczytaniu: inaczej każde wejście w pustą zakładkę byłoby
+  // natychmiast cofane i nie dałoby się jej otworzyć ręcznie.
+  const wybranoAutomatycznie = useRef(false)
+  useEffect(() => {
+    if (ladowanie || wybranoAutomatycznie.current) return
+    wybranoAutomatycznie.current = true
+    if (pozycje.some((p) => klucz(p.rok, p.miesiac) === aktywny)) return
+    const zDanymi = okresy.filter((o) => pozycje.some((p) => p.rok === o.rok && p.miesiac === o.miesiac))
+    if (zDanymi.length) {
+      const ostatni = zDanymi[zDanymi.length - 1]
+      setAktywny(klucz(ostatni.rok, ostatni.miesiac))
+    }
+  }, [ladowanie, pozycje, okresy, aktywny])
+
   if (ladowanie) return <p className="text-slate-500">Wczytywanie ewidencji...</p>
 
-  if (pozycje.length === 0) {
-    return (
-      <div className="rounded-lg border border-slate-200 bg-white p-8 text-center text-slate-600">
-        Brak ewidencji do wyświetlenia.
-        {profil.rola === 'kierownik' && ' Ewidencja pojawi się tutaj po wygenerowaniu jej z danych GPS.'}
-      </div>
-    )
-  }
-
-  // Akcje zbiorcze celowo dotyczą TYLKO najnowszego okresu. Bez tego "zaakceptuj
-  // wszystkie" obejmowałoby z czasem całą historię, łącznie z miesiącami zamkniętymi
-  // dawno temu.
-  const najnowszy = pozycje[0]
-  const okres = pozycje.filter((p) => p.rok === najnowszy.rok && p.miesiac === najnowszy.miesiac)
-  const doAkceptacji = okres.filter((p) => p.status !== 'zaakceptowana')
+  const okresAktywny = okresy.find((o) => klucz(o.rok, o.miesiac) === aktywny) ?? okresy[okresy.length - 1]
+  const wZakladce = pozycje.filter((p) => klucz(p.rok, p.miesiac) === aktywny)
+  const doAkceptacji = wZakladce.filter((p) => p.status !== 'zaakceptowana')
   const ksiegowosc = profil.rola === 'ksiegowosc'
-  const etykietaOkresu = miesiacRok(najnowszy.rok, najnowszy.miesiac)
+  const etykietaOkresu = miesiacRok(okresAktywny.rok, okresAktywny.miesiac)
+  const doPoprawki = pozycje.filter((p) => p.status === 'odeslana_do_poprawki')
 
   async function pobierzTrasy(lista: Pozycja[]): Promise<PozycjaEksportu[]> {
     const { data } = await supabase
@@ -93,9 +102,9 @@ export function ListaEwidencji({ profil, otworz }: Props) {
 
   async function paczka(format: 'pdf' | 'xlsx') {
     setBlad(null)
-    setPostep(`Przygotowuję ${okres.length} plików...`)
+    setPostep(`Przygotowuję ${wZakladce.length} plików...`)
     try {
-      await pobierzPaczke(await pobierzTrasy(okres), format, najnowszy.rok, najnowszy.miesiac)
+      await pobierzPaczke(await pobierzTrasy(wZakladce), format, okresAktywny.rok, okresAktywny.miesiac)
     } catch (e) {
       setBlad(e instanceof Error ? e.message : String(e))
     } finally {
@@ -140,8 +149,6 @@ export function ListaEwidencji({ profil, otworz }: Props) {
     }
   }
 
-  const doPoprawki = pozycje.filter((p) => p.status === 'odeslana_do_poprawki')
-
   return (
     <div className="space-y-4">
       {doPoprawki.length > 0 && profil.rola === 'kierownik' && (
@@ -150,9 +157,37 @@ export function ListaEwidencji({ profil, otworz }: Props) {
         </div>
       )}
 
-      {ksiegowosc && (
+      <div className="flex gap-1 border-b border-slate-200">
+        {okresy.map((o) => {
+          const k = klucz(o.rok, o.miesiac)
+          const ile = pozycje.filter((p) => klucz(p.rok, p.miesiac) === k).length
+          const czynny = k === aktywny
+          return (
+            <button
+              key={k}
+              onClick={() => setAktywny(k)}
+              className={cn(
+                '-mb-px flex items-center gap-2 border-b-2 px-4 py-2.5 text-sm transition-colors',
+                czynny
+                  ? 'border-limonka font-semibold text-slate-900'
+                  : 'border-transparent text-slate-500 hover:text-slate-800',
+              )}
+            >
+              {miesiacRok(o.rok, o.miesiac)}
+              <span className={cn(
+                'rounded-full px-1.5 py-0.5 text-xs',
+                ile ? 'bg-slate-100 text-slate-600' : 'bg-slate-50 text-slate-400',
+              )}>
+                {ile}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+
+      {ksiegowosc && wZakladce.length > 0 && (
         <div className="flex flex-wrap items-center gap-3 rounded-lg border border-slate-200 bg-white p-4">
-          <span className="text-sm font-medium">{etykietaOkresu} — {okres.length} poj.</span>
+          <span className="text-sm font-medium">{etykietaOkresu} — {wZakladce.length} poj.</span>
           <Button wariant="glowny" disabled={!!postep || doAkceptacji.length === 0}
                   onClick={() => setOknoAkceptacji(true)}>
             Zaakceptuj wszystkie ({doAkceptacji.length})
@@ -169,34 +204,44 @@ export function ListaEwidencji({ profil, otworz }: Props) {
 
       {blad && <div className="rounded-md bg-red-50 px-4 py-3 text-sm text-red-700">{blad}</div>}
 
-      <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
-        <table className="w-full">
-          <thead className="bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-600">
-            <tr>
-              <th className="px-4 py-3">Pojazd</th>
-              <th className="px-4 py-3">Marka i model</th>
-              <th className="px-4 py-3">Miesiąc</th>
-              <th className="px-4 py-3 text-right">Razem km</th>
-              <th className="px-4 py-3">Status</th>
-            </tr>
-          </thead>
-          <tbody className="divide-y divide-slate-200">
-            {pozycje.map((p) => (
-              <tr key={p.id} onClick={() => otworz(p.id)} className="cursor-pointer hover:bg-slate-50">
-                <td className="px-4 py-3 font-medium">{p.vehicles.nr_rejestracyjny}</td>
-                <td className="px-4 py-3 text-slate-600">{p.vehicles.marka_model}</td>
-                <td className="px-4 py-3">{miesiacRok(p.rok, p.miesiac)}</td>
-                <td className="px-4 py-3 text-right tabular-nums">{p.suma_km.toLocaleString('pl-PL')}</td>
-                <td className="px-4 py-3">
-                  <span className={cn('inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ring-1', KOLORY_STATUSU[p.status])}>
-                    {ETYKIETY_STATUSU[p.status]}
-                  </span>
-                </td>
+      {wZakladce.length === 0 ? (
+        <div className="rounded-lg border border-slate-200 bg-white p-8 text-center text-slate-600">
+          <p className="font-medium">Brak ewidencji za {etykietaOkresu}.</p>
+          <p className="mt-1 text-sm text-slate-500">
+            Ewidencja za dany miesiąc powstaje pierwszego dnia miesiąca następnego, po
+            pobraniu danych z GPS.
+          </p>
+        </div>
+      ) : (
+        <div className="overflow-hidden rounded-lg border border-slate-200 bg-white">
+          <table className="w-full">
+            <thead className="bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-600">
+              <tr>
+                <th className="px-4 py-3">Pojazd</th>
+                <th className="px-4 py-3">Marka i model</th>
+                <th className="px-4 py-3">Miesiąc</th>
+                <th className="px-4 py-3 text-right">Razem km</th>
+                <th className="px-4 py-3">Status</th>
               </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
+            </thead>
+            <tbody className="divide-y divide-slate-200">
+              {wZakladce.map((p) => (
+                <tr key={p.id} onClick={() => otworz(p.id)} className="cursor-pointer hover:bg-slate-50">
+                  <td className="px-4 py-3 font-medium">{p.vehicles.nr_rejestracyjny}</td>
+                  <td className="px-4 py-3 text-slate-600">{p.vehicles.marka_model}</td>
+                  <td className="px-4 py-3">{miesiacRok(p.rok, p.miesiac)}</td>
+                  <td className="px-4 py-3 text-right tabular-nums">{p.suma_km.toLocaleString('pl-PL')}</td>
+                  <td className="px-4 py-3">
+                    <span className={cn('inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ring-1', KOLORY_STATUSU[p.status])}>
+                      {ETYKIETY_STATUSU[p.status]}
+                    </span>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
 
       <Dialog open={oknoAkceptacji} onOpenChange={setOknoAkceptacji}>
         <DialogContent>
