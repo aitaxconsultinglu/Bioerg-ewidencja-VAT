@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Download, FileSpreadsheet } from 'lucide-react'
+import { ChevronDown, ChevronUp, Download, FileSpreadsheet } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import type { Ewidencja as TEwidencja, Profil, Trasa } from '@/lib/types'
 import { ETYKIETY_STATUSU, KOLORY_STATUSU, miesiacRok, sumaKm } from '@/lib/format'
@@ -20,6 +20,24 @@ interface Okres { rok: number; miesiac: number }
 const WIDOCZNYCH_OKRESOW = 3
 
 const klucz = (rok: number, miesiac: number) => rok * 12 + miesiac
+
+type Kolumna = 'pojazd' | 'marka' | 'kierownik' | 'status'
+type Kierunek = 'asc' | 'desc'
+
+/** Nazwiska trzymamy jako "Imię Nazwisko", a sortować trzeba po nazwisku. Przestawiamy
+ *  więc na "Nazwisko Imię" wyłącznie na potrzeby porównania - wyświetlamy bez zmian. */
+function kluczNazwiska(pelne: string) {
+  const czesci = pelne.trim().split(/\s+/)
+  if (czesci.length < 2) return pelne
+  return `${czesci[czesci.length - 1]} ${czesci.slice(0, -1).join(' ')}`
+}
+
+const NAGLOWKI: { kolumna: Kolumna; etykieta: string }[] = [
+  { kolumna: 'pojazd', etykieta: 'Pojazd' },
+  { kolumna: 'marka', etykieta: 'Marka i model' },
+  { kolumna: 'kierownik', etykieta: 'Kierownik' },
+  { kolumna: 'status', etykieta: 'Status' },
+]
 
 /** Bieżący miesiąc i dwa poprzednie, od najstarszego. Liczone z kalendarza, a nie z
  *  danych - dzięki temu zakładka bieżącego miesiąca istnieje, zanim potok go pobierze,
@@ -44,6 +62,19 @@ export function ListaEwidencji({ profil, otworz }: Props) {
   const [postep, setPostep] = useState<string | null>(null)
   const [blad, setBlad] = useState<string | null>(null)
   const [oknoAkceptacji, setOknoAkceptacji] = useState(false)
+  // Domyślnie po osobie odpowiedzialnej, rosnąco - tabela grupuje się wtedy
+  // kierownikami, co jest najczęstszym sposobem jej czytania.
+  const [sortowanie, setSortowanie] = useState<{ kolumna: Kolumna; kierunek: Kierunek }>({
+    kolumna: 'kierownik', kierunek: 'asc',
+  })
+
+  function przelaczSortowanie(kolumna: Kolumna) {
+    setSortowanie((s) =>
+      s.kolumna === kolumna
+        ? { kolumna, kierunek: s.kierunek === 'asc' ? 'desc' : 'asc' }
+        : { kolumna, kierunek: 'asc' },
+    )
+  }
 
   async function wczytaj() {
     // Osoba odpowiedzialna za pojazd dociągana przez klucz obcy vehicles.kierownik_id.
@@ -85,7 +116,27 @@ export function ListaEwidencji({ profil, otworz }: Props) {
   if (ladowanie) return <p className="text-slate-500">Wczytywanie ewidencji...</p>
 
   const okresAktywny = okresy.find((o) => klucz(o.rok, o.miesiac) === aktywny) ?? okresy[okresy.length - 1]
-  const wZakladce = pozycje.filter((p) => klucz(p.rok, p.miesiac) === aktywny)
+  const wartoscDoSortu = (p: Pozycja): string => {
+    switch (sortowanie.kolumna) {
+      case 'pojazd': return p.vehicles.nr_rejestracyjny
+      case 'marka': return p.vehicles.marka_model
+      case 'kierownik': return kluczNazwiska(p.vehicles.kierownik?.imie_nazwisko ?? 'zzz')
+      case 'status': return ETYKIETY_STATUSU[p.status]
+    }
+  }
+
+  const wZakladce = pozycje
+    .filter((p) => klucz(p.rok, p.miesiac) === aktywny)
+    .slice()
+    .sort((a, b) => {
+      // localeCompare z 'pl' ustawia polskie znaki we właściwej kolejności alfabetu
+      // (ł po l, ż na końcu), czego zwykłe porównanie kodów znaków nie robi.
+      const wynik = wartoscDoSortu(a).localeCompare(wartoscDoSortu(b), 'pl')
+      // Przy równym kluczu porządkujemy rejestracją, żeby kolejność była powtarzalna.
+      const rozstrzygniecie = wynik !== 0 ? wynik
+        : a.vehicles.nr_rejestracyjny.localeCompare(b.vehicles.nr_rejestracyjny, 'pl')
+      return sortowanie.kierunek === 'asc' ? rozstrzygniecie : -rozstrzygniecie
+    })
   const doAkceptacji = wZakladce.filter((p) => p.status !== 'zaakceptowana')
   const ksiegowosc = profil.rola === 'ksiegowosc'
   const etykietaOkresu = miesiacRok(okresAktywny.rok, okresAktywny.miesiac)
@@ -220,12 +271,36 @@ export function ListaEwidencji({ profil, otworz }: Props) {
           <table className="w-full">
             <thead className="bg-slate-100 text-left text-xs uppercase tracking-wide text-slate-600">
               <tr>
-                <th className="px-4 py-3">Pojazd</th>
-                <th className="px-4 py-3">Marka i model</th>
-                <th className="px-4 py-3">Kierownik</th>
+                {NAGLOWKI.slice(0, 3).map(({ kolumna, etykieta }) => (
+                  <th key={kolumna} className="px-4 py-3">
+                    <button
+                      onClick={() => przelaczSortowanie(kolumna)}
+                      className="flex items-center gap-1 uppercase tracking-wide hover:text-slate-900"
+                    >
+                      {etykieta}
+                      {sortowanie.kolumna === kolumna && (
+                        sortowanie.kierunek === 'asc'
+                          ? <ChevronUp className="h-3.5 w-3.5" />
+                          : <ChevronDown className="h-3.5 w-3.5" />
+                      )}
+                    </button>
+                  </th>
+                ))}
                 <th className="px-4 py-3">Miesiąc</th>
                 <th className="px-4 py-3 text-right">Razem km</th>
-                <th className="px-4 py-3">Status</th>
+                <th className="px-4 py-3">
+                  <button
+                    onClick={() => przelaczSortowanie('status')}
+                    className="flex items-center gap-1 uppercase tracking-wide hover:text-slate-900"
+                  >
+                    Status
+                    {sortowanie.kolumna === 'status' && (
+                      sortowanie.kierunek === 'asc'
+                        ? <ChevronUp className="h-3.5 w-3.5" />
+                        : <ChevronDown className="h-3.5 w-3.5" />
+                    )}
+                  </button>
+                </th>
               </tr>
             </thead>
             <tbody className="divide-y divide-slate-200">
