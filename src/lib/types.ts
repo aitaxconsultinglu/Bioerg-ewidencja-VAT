@@ -21,6 +21,8 @@ export interface Pojazd {
   marka_model: string
   oddzial: string | null
   kierownik_id: string | null
+  /** Doczytywane tylko tam, gdzie lista pokazuje osobę odpowiedzialną za pojazd. */
+  kierownik?: { imie_nazwisko: string } | null
 }
 
 export interface Ewidencja {
