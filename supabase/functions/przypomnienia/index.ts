@@ -15,6 +15,10 @@ const MIESIACE_PL = [
 const ADRES_APLIKACJI = 'https://aitaxconsultinglu.github.io/Bioerg-ewidencja-VAT/'
 const ODSTEP_DNI = 2
 
+/** Kopia kazdego przypomnienia, zeby bylo widac kto i o co jest ponaglany bez
+ *  zagladania do logow funkcji. */
+const KOPIA_PRZYPOMNIEN = 'aitaxconsultinglu@gmail.com'
+
 /** Niedziela Wielkanocna metoda Meeusa/Jonesa/Butchera - od niej liczy sie Poniedzialek
  *  Wielkanocny i Boze Cialo, jedyne ruchome swieta wolne wypadajace w dzien roboczy. */
 function wielkanoc(rok: number) {
@@ -161,6 +165,8 @@ Deno.serve(async () => {
       await klient.send({
         from: Deno.env.get('EMAIL_USER')!,
         to: profil.email,
+        // Nie dubluj, gdyby ponaglany byl sam adres kopii.
+        cc: profil.email === KOPIA_PRZYPOMNIEN ? undefined : KOPIA_PRZYPOMNIEN,
         subject: `Przypomnienie: uzupełnij ewidencję przebiegu pojazdu (termin: ${termin})`,
         content: [
           `Dzień dobry${profil.imie_nazwisko ? ', ' + profil.imie_nazwisko : ''},`,
