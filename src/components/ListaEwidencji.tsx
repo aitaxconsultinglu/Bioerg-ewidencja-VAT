@@ -15,6 +15,17 @@ interface Props {
 
 type Pozycja = TEwidencja & { suma_km: number }
 
+/** Lista pokazuje trzy ostatnie okresy - tyle, ile realnie bywa w obiegu naraz.
+ *  Wcześniejsze miesiące zostają w bazie i w archiwum PDF, ale nie zaśmiecają widoku. */
+const WIDOCZNYCH_OKRESOW = 3
+
+/** Ewidencja w aplikacji zaczyna się od września 2026. Sierpień był miesiącem
+ *  testowym i świadomie nie jest pokazywany. */
+const PIERWSZY_OKRES = { rok: 2026, miesiac: 9 }
+
+const klucz = (rok: number, miesiac: number) => rok * 12 + miesiac
+const PROG = klucz(PIERWSZY_OKRES.rok, PIERWSZY_OKRES.miesiac)
+
 export function ListaEwidencji({ profil, otworz }: Props) {
   const [pozycje, setPozycje] = useState<Pozycja[]>([])
   const [ladowanie, setLadowanie] = useState(true)
@@ -29,10 +40,20 @@ export function ListaEwidencji({ profil, otworz }: Props) {
       .order('rok', { ascending: false })
       .order('miesiac', { ascending: false })
 
-    setPozycje((data ?? []).map((p) => ({
+    const wszystkie = (data ?? []).map((p) => ({
       ...(p as unknown as TEwidencja),
       suma_km: sumaKm(((p as { trips?: { km: number }[] }).trips) ?? []),
-    })))
+    }))
+
+    // Trzy najnowsze okresy, nie wcześniej niż wrzesień 2026. Filtrujemy po stronie
+    // przeglądarki, bo PostgREST nie porówna pary (rok, miesiąc) jednym warunkiem,
+    // a zbiór jest mały - 23 pojazdy na miesiąc.
+    const okresy = [...new Set(wszystkie.map((p) => klucz(p.rok, p.miesiac)))]
+      .filter((k) => k >= PROG)
+      .sort((a, b) => b - a)
+      .slice(0, WIDOCZNYCH_OKRESOW)
+
+    setPozycje(wszystkie.filter((p) => okresy.includes(klucz(p.rok, p.miesiac))))
     setLadowanie(false)
   }
 

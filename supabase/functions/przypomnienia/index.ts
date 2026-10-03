@@ -15,20 +15,71 @@ const MIESIACE_PL = [
 const ADRES_APLIKACJI = 'https://aitaxconsultinglu.github.io/Bioerg-ewidencja-VAT/'
 const ODSTEP_DNI = 2
 
-/** Termin wyznaczany w dniach ROBOCZYCH - przypomnienie wysłane w piątek daje czas
- *  do wtorku, a nie do niedzieli. */
+/** Niedziela Wielkanocna metoda Meeusa/Jonesa/Butchera - od niej liczy sie Poniedzialek
+ *  Wielkanocny i Boze Cialo, jedyne ruchome swieta wolne wypadajace w dzien roboczy. */
+function wielkanoc(rok: number) {
+  const a = rok % 19
+  const b = Math.floor(rok / 100)
+  const c = rok % 100
+  const d = Math.floor(b / 4)
+  const e = b % 4
+  const f = Math.floor((b + 8) / 25)
+  const g = Math.floor((b - f + 1) / 3)
+  const h = (19 * a + b - d - g + 15) % 30
+  const i = Math.floor(c / 4)
+  const k = c % 4
+  const l = (32 + 2 * e + 2 * i - h - k) % 7
+  const m = Math.floor((a + 11 * h + 22 * l) / 451)
+  const miesiac = Math.floor((h + l - 7 * m + 114) / 31)
+  const dzien = ((h + l - 7 * m + 114) % 31) + 1
+  return new Date(Date.UTC(rok, miesiac - 1, dzien))
+}
+
+function mmdd(d: Date) {
+  return `${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`
+}
+
+/** Dni ustawowo wolne od pracy w Polsce. Niedziele obslugujemy osobno. */
+function dzienWolny(d: Date) {
+  const STALE = ['01-01', '01-06', '05-01', '05-03', '08-15', '11-01', '11-11', '12-25', '12-26']
+  if (STALE.includes(mmdd(d))) return true
+
+  const w = wielkanoc(d.getUTCFullYear())
+  const poniedzialekWielkanocny = new Date(w.getTime() + 1 * 86_400_000)
+  const bozeCialo = new Date(w.getTime() + 60 * 86_400_000)
+  return mmdd(d) === mmdd(poniedzialekWielkanocny) || mmdd(d) === mmdd(bozeCialo)
+}
+
+/** Termin wyznaczany w dniach ROBOCZYCH - przypomnienie wysłane w piątek daje czas do
+ *  wtorku, a nie do niedzieli. Pomija też święta, żeby nie wyznaczyć terminu na dzień,
+ *  w którym nikt nie pracuje. */
 function terminRoboczy(dniRoboczych: number) {
   const d = new Date()
   let dodane = 0
   while (dodane < dniRoboczych) {
-    d.setDate(d.getDate() + 1)
-    const dzien = d.getDay()
-    if (dzien !== 0 && dzien !== 6) dodane++
+    d.setUTCDate(d.getUTCDate() + 1)
+    const dzien = d.getUTCDay()
+    if (dzien !== 0 && dzien !== 6 && !dzienWolny(d)) dodane++
   }
-  return `${String(d.getDate()).padStart(2, '0')}.${String(d.getMonth() + 1).padStart(2, '0')}.${d.getFullYear()}`
+  return `${String(d.getUTCDate()).padStart(2, '0')}.${String(d.getUTCMonth() + 1).padStart(2, '0')}.${d.getUTCFullYear()}`
 }
 
 Deno.serve(async () => {
+  // Poniedzialek-sobota, z pominieciem swiat. Zadanie cron chodzi tez w te dni, ale
+  // sprawdzamy to rowniez tutaj: dzien wolny zalezy od daty (Wielkanoc, Boze Cialo),
+  // czego harmonogram cron nie wyrazi, a przy recznym wywolaniu crona i tak nie ma.
+  const dzis = new Date()
+  if (dzis.getUTCDay() === 0) {
+    return new Response(JSON.stringify({ wyslano: 0, powod: 'niedziela' }), {
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+  if (dzienWolny(dzis)) {
+    return new Response(JSON.stringify({ wyslano: 0, powod: 'dzien ustawowo wolny' }), {
+      headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
   const supabase = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
