@@ -28,20 +28,35 @@ export function dataGodzinaPL(iso: string | null) {
   return d.toLocaleString('pl-PL', { dateStyle: 'short', timeStyle: 'short' })
 }
 
-/** Ewidencja prowadzona jest w pełnych kilometrach - wszędzie, łącznie z eksportami. */
+/** Najkrótszy dystans, jaki ewidencja wykazuje. Przejazd, który faktycznie się odbył,
+ *  nie może figurować jako zero kilometrów - a przy zaokrąglaniu do pełnych kilometrów
+ *  tak właśnie wychodziło dla krótkich przejazdów po terenie zakładu. */
+const MINIMALNY_DYSTANS = 0.1
+
+/** Zaokrąglenie do 0,1 km z podłogą na MINIMALNY_DYSTANS. Sama zmiana dokładności nie
+ *  wystarczy: część tras ma w danych GPS 0,01-0,04 km i do jednego miejsca po przecinku
+ *  nadal dawałaby "0,0". Zero zwracamy wyłącznie dla dystansu, którego naprawdę nie ma. */
+export function kmLiczba(wartosc: number | null | undefined) {
+  const x = Number(wartosc ?? 0)
+  if (!(x > 0)) return 0
+  return Math.max(MINIMALNY_DYSTANS, Math.round(x * 10) / 10)
+}
+
+export function formatujKm(wartosc: number) {
+  return wartosc.toLocaleString('pl-PL', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+}
+
 export function km(wartosc: number | null) {
   if (wartosc === null || wartosc === undefined) return ''
-  return Math.round(Number(wartosc)).toLocaleString('pl-PL')
+  return formatujKm(kmLiczba(wartosc))
 }
 
-export function kmLiczba(wartosc: number | null | undefined) {
-  return Math.round(Number(wartosc ?? 0))
-}
-
-/** Suma liczona z wartości JUŻ zaokrąglonych, żeby "Razem" zgadzało się z tym, co
- *  widać w kolumnie - inaczej wiersz podsumowania potrafi różnić się o 1-2 km. */
+/** Suma liczona z wartości JUŻ zaokrąglonych, żeby "Razem" zgadzało się z tym, co widać
+ *  w kolumnie. Sumujemy dziesiąte jako liczby całkowite - dodawanie 0,1 w arytmetyce
+ *  zmiennoprzecinkowej kumuluje błąd i przy kilkudziesięciu trasach daje końcówki
+ *  w rodzaju 2303,0999999. */
 export function sumaKm(trasy: { km: number }[]) {
-  return trasy.reduce((s, t) => s + kmLiczba(t.km), 0)
+  return Math.round(trasy.reduce((s, t) => s + kmLiczba(t.km) * 10, 0)) / 10
 }
 
 export function licznik(wartosc: number | null) {

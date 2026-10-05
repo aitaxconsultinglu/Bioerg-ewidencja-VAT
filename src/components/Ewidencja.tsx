@@ -4,7 +4,7 @@ import { supabase } from '@/lib/supabase'
 import type { Ewidencja as TEwidencja, PoleEdytowalne, Profil, Trasa, WpisAudytu } from '@/lib/types'
 import {
   ETYKIETY_STATUSU, KOLORY_STATUSU, celDoUzupelnienia,
-  dataGodzinaPL, licznik, miesiacRok, sumaKm,
+  dataGodzinaPL, formatujKm, licznik, miesiacRok, sumaKm,
 } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { nazwaPliku, pobierzExcel, pobierzPdf, zbudujPdf } from '@/lib/eksport'
@@ -229,11 +229,16 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
           </div>
           <div>
             <dt className="text-slate-500">Licznik - koniec</dt>
-            <dd className="font-medium tabular-nums">{licznik(ewidencja.stan_licznika_koniec)}</dd>
+            {/* Liczony jako początek + Razem, a nie brany z bazy: dzięki temu różnica
+                stanów licznika zawsze równa się sumie z kolumny kilometrów, także po
+                zaokrągleniu tras do 0,1 km. */}
+            <dd className="font-medium tabular-nums">
+              {licznik((ewidencja.stan_licznika_poczatek ?? 0) + sumaKm(trasy))}
+            </dd>
           </div>
           <div>
             <dt className="text-slate-500">Razem km</dt>
-            <dd className="font-medium tabular-nums">{sumaKm(trasy).toLocaleString('pl-PL')}</dd>
+            <dd className="font-medium tabular-nums">{formatujKm(sumaKm(trasy))}</dd>
           </div>
           <div>
             <dt className="text-slate-500">Podpis kierownika</dt>

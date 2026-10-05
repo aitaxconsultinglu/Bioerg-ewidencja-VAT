@@ -4,7 +4,7 @@ import autoTable from 'jspdf-autotable'
 import JSZip from 'jszip'
 import type { Ewidencja, Trasa } from './types'
 import { NAZWA_PODATNIKA } from './config'
-import { dataPL, km, kmLiczba, licznik, miesiacRok, sumaKm } from './format'
+import { dataPL, formatujKm, km, kmLiczba, licznik, miesiacRok, sumaKm } from './format'
 
 const RAMKA = {
   top: { style: 'thin' }, bottom: { style: 'thin' },
@@ -16,7 +16,11 @@ export interface PozycjaEksportu {
   trasy: Trasa[]
 }
 
-function etykietyNaglowka(e: Ewidencja): [string, string][] {
+/** Stan licznika na koniec liczymy jako początek + suma z kolumny, zamiast brać go
+ *  z bazy. Inaczej różnica stanów licznika nie zgadzałaby się z wierszem "Razem", bo
+ *  baza trzyma sumę surową, a dokument pokazuje trasy zaokrąglone do 0,1 km. */
+function etykietyNaglowka(e: Ewidencja, suma: number): [string, string][] {
+  const koniec = (e.stan_licznika_poczatek ?? 0) + suma
   return [
     ['Nazwa podatnika:', NAZWA_PODATNIKA],
     ['Marka i model pojazdu samochodowego:', e.vehicles.marka_model],
@@ -25,7 +29,7 @@ function etykietyNaglowka(e: Ewidencja): [string, string][] {
     ['Dzień rozpoczęcia prowadzenia ewidencji:', dataPL(e.dzien_rozpoczecia_ewidencji)],
     ['Dzień zakończenia prowadzenia ewidencji:', ''],
     ['Stan licznika na początek miesiąca:', licznik(e.stan_licznika_poczatek)],
-    ['Stan licznika na koniec miesiąca:', licznik(e.stan_licznika_koniec)],
+    ['Stan licznika na koniec miesiąca:', licznik(koniec)],
     ['Stan licznika na dzień rozpoczęcia prowadzenia ewidencji:', licznik(e.stan_rozpoczecia_ewidencji)],
     ['Stan licznika na dzień zakończenia prowadzenia ewidencji:', ''],
   ]
@@ -95,7 +99,7 @@ async function ustawWydrukNaJednaStroneA4(bufor: ArrayBuffer): Promise<Blob> {
  */
 export async function zbudujExcel(e: Ewidencja, trasy: Trasa[]): Promise<Blob> {
   const suma = sumaKm(trasy)
-  const naglowek = etykietyNaglowka(e)
+  const naglowek = etykietyNaglowka(e, suma)
 
   const aoa: (string | number | null)[][] = []
   aoa.push(['Miesięczna ewidencja przebiegu pojazdu', null, null, null, null, null, null, null])
@@ -172,6 +176,9 @@ export async function zbudujExcel(e: Ewidencja, trasy: Trasa[]): Promise<Blob> {
         font: { name: 'Calibri', sz: 11 },
         alignment: { horizontal: 'center', vertical: 'center', wrapText: [3, 4, 6].includes(c) },
         border: RAMKA,
+        // Kolumna kilometrów zawsze z jednym miejscem po przecinku - bez tego Excel
+        // pokazałby 0,1 jako "0,1", ale 2 jako "2", co rozjeżdża kolumnę.
+        ...(c === 5 ? { numFmt: '0.0' } : {}),
       })
     }
   })
@@ -181,6 +188,7 @@ export async function zbudujExcel(e: Ewidencja, trasy: Trasa[]): Promise<Blob> {
   styl(wierszRazem, 5, {
     font: { name: 'Calibri', sz: 11, bold: true },
     alignment: { horizontal: 'center', vertical: 'center' }, border: RAMKA,
+    numFmt: '0.0',
   })
   for (const c of [0, 5]) {
     styl(wierszPodpisow, c, {
@@ -248,7 +256,7 @@ export async function zbudujPdf(e: Ewidencja, trasy: Trasa[]): Promise<Blob> {
 
   doc.setFontSize(9)
   let y = 24
-  etykietyNaglowka(e).forEach(([etykieta, wartosc]) => {
+  etykietyNaglowka(e, suma).forEach(([etykieta, wartosc]) => {
     doc.text(etykieta, 12, y)
     doc.text(String(wartosc ?? ''), 150, y)
     y += 5
@@ -260,7 +268,7 @@ export async function zbudujPdf(e: Ewidencja, trasy: Trasa[]): Promise<Blob> {
     body: trasy.map((t) => [
       t.lp, dataPL(t.data_wyjazdu), t.cel_wyjazdu, t.skad, t.dokad, km(t.km), t.kierowca,
     ]),
-    foot: [['Razem:', '', '', '', '', suma.toLocaleString('pl-PL'), '']],
+    foot: [['Razem:', '', '', '', '', formatujKm(suma), '']],
     // Podsumowanie ma wystąpić RAZ, pod ostatnim wierszem - nie powtarzać się na
     // każdej stronie, bo dokument przestaje wtedy czytać się jak jedna ciągła tabela.
     showFoot: 'lastPage',
