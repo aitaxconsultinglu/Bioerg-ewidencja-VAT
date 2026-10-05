@@ -176,9 +176,9 @@ export async function zbudujExcel(e: Ewidencja, trasy: Trasa[]): Promise<Blob> {
         font: { name: 'Calibri', sz: 11 },
         alignment: { horizontal: 'center', vertical: 'center', wrapText: [3, 4, 6].includes(c) },
         border: RAMKA,
-        // Kolumna kilometrów zawsze z jednym miejscem po przecinku - bez tego Excel
-        // pokazałby 0,1 jako "0,1", ale 2 jako "2", co rozjeżdża kolumnę.
-        ...(c === 5 ? { numFmt: '0.0' } : {}),
+        // Kolumna kilometrów zawsze z dwoma miejscami po przecinku - bez tego Excel
+        // pokazałby 0,01 jako "0,01", ale 2 jako "2", co rozjeżdża kolumnę.
+        ...(c === 5 ? { numFmt: '0.00' } : {}),
       })
     }
   })
@@ -188,7 +188,7 @@ export async function zbudujExcel(e: Ewidencja, trasy: Trasa[]): Promise<Blob> {
   styl(wierszRazem, 5, {
     font: { name: 'Calibri', sz: 11, bold: true },
     alignment: { horizontal: 'center', vertical: 'center' }, border: RAMKA,
-    numFmt: '0.0',
+    numFmt: '0.00',
   })
   for (const c of [0, 5]) {
     styl(wierszPodpisow, c, {

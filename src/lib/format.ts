@@ -29,21 +29,22 @@ export function dataGodzinaPL(iso: string | null) {
 }
 
 /** Najkrótszy dystans, jaki ewidencja wykazuje. Przejazd, który faktycznie się odbył,
- *  nie może figurować jako zero kilometrów - a przy zaokrąglaniu do pełnych kilometrów
- *  tak właśnie wychodziło dla krótkich przejazdów po terenie zakładu. */
-const MINIMALNY_DYSTANS = 0.1
+ *  nie może figurować jako zero kilometrów. */
+const MINIMALNY_DYSTANS = 0.01
 
-/** Zaokrąglenie do 0,1 km z podłogą na MINIMALNY_DYSTANS. Sama zmiana dokładności nie
- *  wystarczy: część tras ma w danych GPS 0,01-0,04 km i do jednego miejsca po przecinku
- *  nadal dawałaby "0,0". Zero zwracamy wyłącznie dla dystansu, którego naprawdę nie ma. */
+/** Kilometry pokazujemy z dokładnością do 0,01 km - czyli dokładnie taką, z jaką
+ *  trafiają do bazy (kolumna numeric(10,2)). Nic się więc po drodze nie gubi i suma
+ *  z kolumny równa się co do grosza sumie surowej z GPS. Podłoga na MINIMALNY_DYSTANS
+ *  zabezpiecza przed hipotetycznym przejazdem krótszym niż 0,005 km, który po
+ *  zaokrągleniu dałby zero. */
 export function kmLiczba(wartosc: number | null | undefined) {
   const x = Number(wartosc ?? 0)
   if (!(x > 0)) return 0
-  return Math.max(MINIMALNY_DYSTANS, Math.round(x * 10) / 10)
+  return Math.max(MINIMALNY_DYSTANS, Math.round(x * 100) / 100)
 }
 
 export function formatujKm(wartosc: number) {
-  return wartosc.toLocaleString('pl-PL', { minimumFractionDigits: 1, maximumFractionDigits: 1 })
+  return wartosc.toLocaleString('pl-PL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 export function km(wartosc: number | null) {
@@ -52,16 +53,22 @@ export function km(wartosc: number | null) {
 }
 
 /** Suma liczona z wartości JUŻ zaokrąglonych, żeby "Razem" zgadzało się z tym, co widać
- *  w kolumnie. Sumujemy dziesiąte jako liczby całkowite - dodawanie 0,1 w arytmetyce
- *  zmiennoprzecinkowej kumuluje błąd i przy kilkudziesięciu trasach daje końcówki
- *  w rodzaju 2303,0999999. */
+ *  w kolumnie. Sumujemy setne jako liczby całkowite - dodawanie ułamków dziesiętnych
+ *  w arytmetyce zmiennoprzecinkowej kumuluje błąd i przy kilkudziesięciu trasach daje
+ *  końcówki w rodzaju 2302,2599999997. */
 export function sumaKm(trasy: { km: number }[]) {
-  return Math.round(trasy.reduce((s, t) => s + kmLiczba(t.km) * 10, 0)) / 10
+  return Math.round(trasy.reduce((s, t) => s + kmLiczba(t.km) * 100, 0)) / 100
 }
 
+/** Stan licznika. Odczyt z licznika jest liczbą całkowitą i tak go pokazujemy, ale stan
+ *  wyliczony (początek + suma tras) ma część ułamkową - wtedy pokazujemy dwa miejsca,
+ *  żeby różnica stanów licznika zgadzała się co do setnej z wierszem "Razem". */
 export function licznik(wartosc: number | null) {
   if (wartosc === null || wartosc === undefined) return ''
-  return Math.round(wartosc).toLocaleString('pl-PL')
+  const x = Math.round(Number(wartosc) * 100) / 100
+  return Number.isInteger(x)
+    ? x.toLocaleString('pl-PL')
+    : x.toLocaleString('pl-PL', { minimumFractionDigits: 2, maximumFractionDigits: 2 })
 }
 
 export const ETYKIETY_STATUSU: Record<Status, string> = {
