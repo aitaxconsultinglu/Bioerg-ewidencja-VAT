@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { ChevronDown, ChevronUp, Download, FileSpreadsheet } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import type { Ewidencja as TEwidencja, Profil, Trasa } from '@/lib/types'
-import { ETYKIETY_STATUSU, KOLORY_STATUSU, miesiacRok, sumaKm } from '@/lib/format'
+import { ETYKIETY_STATUSU, KOLORY_STATUSU, formatujKm, miesiacRok, sumaKm } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { nazwaPliku, pobierzPaczke, zbudujPdf, type PozycjaEksportu } from '@/lib/eksport'
 import { Button } from './ui/button'
@@ -313,7 +313,7 @@ export function ListaEwidencji({ profil, otworz }: Props) {
                       ?? <span className="text-amber-700">brak przypisania</span>}
                   </td>
                   <td className="px-4 py-3">{miesiacRok(p.rok, p.miesiac)}</td>
-                  <td className="px-4 py-3 text-right tabular-nums">{p.suma_km.toLocaleString('pl-PL')}</td>
+                  <td className="px-4 py-3 text-right tabular-nums">{formatujKm(p.suma_km)}</td>
                   <td className="px-4 py-3">
                     <span className={cn('inline-flex rounded-full px-2.5 py-0.5 text-xs font-medium ring-1', KOLORY_STATUSU[p.status])}>
                       {ETYKIETY_STATUSU[p.status]}

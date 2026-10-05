@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PoleEdytowalne, Trasa } from '@/lib/types'
-import { celDoUzupelnienia, dataPL, km, sumaKm } from '@/lib/format'
+import { celDoUzupelnienia, dataPL, formatujKm, km, sumaKm } from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 interface Props {
@@ -194,7 +194,7 @@ export function TabelaTras({ trasy, zablokowana, zapisz }: Props) {
             ))}
             <tr className="bg-slate-50 font-semibold">
               <td className="komorka" colSpan={5}>Razem:</td>
-              <td className="komorka text-right tabular-nums">{sumaKm(trasy).toLocaleString('pl-PL')}</td>
+              <td className="komorka text-right tabular-nums">{formatujKm(sumaKm(trasy))}</td>
               <td className="komorka" />
             </tr>
           </tbody>
