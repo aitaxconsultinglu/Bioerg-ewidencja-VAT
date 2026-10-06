@@ -8,6 +8,7 @@ import {
 } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { nazwaPliku, pobierzExcel, pobierzPdf, zbudujPdf } from '@/lib/eksport'
+import { TOLERANCJA_LICZNIKA_KM } from '@/lib/config'
 import { TabelaTras } from './TabelaTras'
 import { Button } from './ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog'
@@ -20,6 +21,18 @@ interface Props {
 
 type TrybMasowy = 'wiersze' | 'kierowca' | 'cel'
 
+/** WARSTWA 3 kontroli danych GPS: o ile faktyczny odczyt licznika rozjeżdża się ze stanem
+ *  wyliczonym z ewidencji (licznik na początek + suma tras). Zwraca null, gdy kierownik
+ *  jeszcze nic nie wpisał albo wpisał coś, co nie jest liczbą. Przecinek dziesiętny jest
+ *  dopuszczalny - w polskiej klawiaturze numerycznej to on jest pod ręką. */
+function roznicaZLicznikiem(wpisany: string, wyliczony: number): number | null {
+  const tekst = wpisany.trim().replace(',', '.')
+  if (tekst === '') return null
+  const odczyt = Number(tekst)
+  if (!Number.isFinite(odczyt)) return null
+  return Math.round((odczyt - wyliczony) * 100) / 100
+}
+
 export function Ewidencja({ logId, profil, naListe }: Props) {
   const [ewidencja, setEwidencja] = useState<TEwidencja | null>(null)
   const [trasy, setTrasy] = useState<Trasa[]>([])
@@ -30,6 +43,7 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
   const [wartoscMasowa, setWartoscMasowa] = useState('')
   const [oknoPoprawki, setOknoPoprawki] = useState(false)
   const [komentarz, setKomentarz] = useState('')
+  const [licznikRzeczywisty, setLicznikRzeczywisty] = useState('')
   const [zajety, setZajety] = useState(false)
   const [blad, setBlad] = useState<string | null>(null)
 
@@ -47,6 +61,8 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
     setAudyt((a ?? []) as WpisAudytu[])
     setPodpis(e?.podpis_imie_nazwisko ?? (profil.rola === 'kierownik' ? profil.imie_nazwisko : ''))
     setPodpisAkceptacji(e?.akceptacja_imie_nazwisko ?? (profil.rola === 'ksiegowosc' ? profil.imie_nazwisko : ''))
+    const odczyt = e?.stan_licznika_koniec_rzeczywisty
+    setLicznikRzeczywisty(odczyt === null || odczyt === undefined ? '' : String(odczyt))
   }, [logId, profil.imie_nazwisko, profil.rola])
 
   useEffect(() => { void wczytaj() }, [wczytaj])
@@ -82,11 +98,42 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
     setZajety(false)
   }
 
+  /** Zapisuje odczyt licznika od razu po wyjściu z pola - kierownik może wpisać go wcześniej
+   *  niż podpis, a dane nie mogą zniknąć przy przeładowaniu widoku. */
+  async function zapiszOdczytLicznika() {
+    const tekst = licznikRzeczywisty.trim().replace(',', '.')
+    if (tekst !== '' && !Number.isFinite(Number(tekst))) {
+      setBlad('Stan licznika musi być liczbą, np. 576 albo 575,99.')
+      return
+    }
+    const { error } = await supabase.from('monthly_logs')
+      .update({ stan_licznika_koniec_rzeczywisty: tekst === '' ? null : Number(tekst) })
+      .eq('id', logId)
+    if (error) setBlad(error.message)
+    else setBlad(null)
+  }
+
   async function wyslijDoAkceptacji() {
     if (!podpis.trim()) { setBlad('Podpisz ewidencję, wpisując imię i nazwisko.'); return }
     const braki = trasy.filter((t) => !t.kierowca.trim() || celDoUzupelnienia(t.cel_wyjazdu))
     if (braki.length > 0) {
       setBlad(`Uzupełnij cel wyjazdu i kierowcę we wszystkich pozycjach (brakuje w ${braki.length}).`)
+      return
+    }
+    // WARSTWA 3: ewidencja przebiegu musi zgadzać się z licznikiem pojazdu. Bez tego
+    // usterka urządzenia GPS trafia do dokumentacji VAT z podpisem kierownika.
+    const wyliczony = (ewidencja?.stan_licznika_poczatek ?? 0) + sumaKm(trasy)
+    const roznica = roznicaZLicznikiem(licznikRzeczywisty, wyliczony)
+    if (roznica === null) {
+      setBlad('Wpisz faktyczny stan licznika pojazdu na koniec miesiąca - bez tego nie da się '
+            + 'wysłać ewidencji do akceptacji.')
+      return
+    }
+    if (Math.abs(roznica) > TOLERANCJA_LICZNIKA_KM) {
+      setBlad(`Ewidencja nie zgadza się z licznikiem: z tras wychodzi ${licznik(wyliczony)} km, `
+            + `a licznik pokazuje ${licznik(wyliczony + roznica)} km (różnica `
+            + `${formatujKm(Math.abs(roznica))} km). Sprawdź, czy któraś trasa nie jest błędem `
+            + 'GPS, i zgłoś to księgowości - nie podpisuj ewidencji, która nie zgadza się z pojazdem.')
       return
     }
     setZajety(true)
@@ -188,6 +235,10 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
   // Księgowość może zatwierdzić albo odesłać na każdym etapie poza już zablokowanym -
   // także po odblokowaniu i ponownej edycji.
   const ksiegowoscMozeDzialac = ksiegowosc && !zablokowana
+  const licznikWyliczony = (ewidencja.stan_licznika_poczatek ?? 0) + sumaKm(trasy)
+  const roznicaLicznika = roznicaZLicznikiem(licznikRzeczywisty, licznikWyliczony)
+  const licznikRozjechany =
+    roznicaLicznika !== null && Math.abs(roznicaLicznika) > TOLERANCJA_LICZNIKA_KM
 
   return (
     <div className="space-y-5">
@@ -324,6 +375,31 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
       <div className="flex flex-wrap items-end justify-between gap-4 rounded-lg border border-slate-200 bg-white p-4">
         {mozeWyslac && (
           <>
+            <div>
+              <label className="block text-sm font-medium text-slate-700" htmlFor="licznik-rzeczywisty">
+                Stan licznika pojazdu na koniec miesiąca (odczyt z deski rozdzielczej)
+              </label>
+              <input
+                id="licznik-rzeczywisty"
+                inputMode="decimal"
+                value={licznikRzeczywisty}
+                onChange={(e) => setLicznikRzeczywisty(e.target.value)}
+                onBlur={() => void zapiszOdczytLicznika()}
+                className="mt-1 w-48 rounded-md border border-slate-300 px-3 py-2 text-sm tabular-nums focus:border-blekit focus:outline-none"
+              />
+              <p className="mt-1 text-xs text-slate-500">
+                Z tras w tabeli wychodzi {licznik(licznikWyliczony)} km.
+              </p>
+              {licznikRozjechany && roznicaLicznika !== null && (
+                <p className="mt-2 max-w-xl rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800 ring-1 ring-amber-400">
+                  Różnica {formatujKm(Math.abs(roznicaLicznika))} km
+                  {roznicaLicznika > 0 ? ' (licznik pokazuje więcej)' : ' (licznik pokazuje mniej)'}.
+                  Ewidencja musi zgadzać się z licznikiem pojazdu, więc nie da się jej teraz wysłać
+                  do akceptacji. Najczęstsza przyczyna to błąd urządzenia GPS - sprawdź, czy któraś
+                  trasa nie pokazuje kilometrów, których nie było, i zgłoś to księgowości.
+                </p>
+              )}
+            </div>
             <div>
               <label className="block text-sm font-medium text-slate-700" htmlFor="podpis">
                 Podpis kierownika (imię i nazwisko)

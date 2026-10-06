@@ -12,6 +12,14 @@ export const SUPABASE_ANON_KEY =
 
 export const NAZWA_PODATNIKA = 'Bioerg Sp. z o.o.'
 
+// WARSTWA 3 kontroli danych GPS. O tyle kilometrów ewidencja może różnić się od faktycznego
+// odczytu licznika, zanim przestaniemy pozwalać wysłać ją do akceptacji. Kilka kilometrów
+// bierze się z zaokrągleń i z tego, że licznik pojazdu odczytuje się ręcznie, nie co do metra.
+// Większa różnica to sygnał usterki urządzenia GPS, a nie niedokładność: wrzesień 2026, trzy
+// nowe Toyoty ProAce - urządzenia naliczyły 1393 km, których pojazdy nie przejechały
+// (sumowany szum GPS na postoju + transport urządzenia z miejsca montażu).
+export const TOLERANCJA_LICZNIKA_KM = 5
+
 export const MIN_DLUGOSC_HASLA = 6
 const ZNAKI_SPECJALNE = /[^A-Za-z0-9]/
 

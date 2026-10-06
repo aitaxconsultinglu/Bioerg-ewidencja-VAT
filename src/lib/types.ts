@@ -35,6 +35,9 @@ export interface Ewidencja {
   stan_rozpoczecia_ewidencji: number | null
   stan_licznika_poczatek: number | null
   stan_licznika_koniec: number | null
+  /** WARSTWA 3: faktyczny odczyt z licznika pojazdu na koniec miesiąca, wpisany przez
+   *  kierownika. Opcjonalny w typie, bo stare wiersze go nie mają. */
+  stan_licznika_koniec_rzeczywisty?: number | null
   podpis_imie_nazwisko: string | null
   podpis_at: string | null
   akceptacja_imie_nazwisko: string | null
