@@ -1,11 +1,43 @@
-// Przypomnienie co dwa dni dla kierownikow, ktorzy nie wyslali jeszcze ewidencji do
-// akceptacji. Zadanie cron chodzi codziennie, ale mail wychodzi dopiero gdy od
-// poprzedniego minely 2 dni - dzieki temu odstep liczy sie od OSTATNIEGO przypomnienia
-// dla danej ewidencji, a nie od sztywnego dnia tygodnia.
+// Przypomnienia dla kierownikow, ktorzy maja cos do zrobienia z ewidencja.
+//
+// Dwa rytmy (od 2026-10-20):
+//  - ewidencja NIEWYSLANA (wygenerowana / w edycji) - co dwa dni, jak dotad;
+//  - ewidencja ODESLANA DO POPRAWKI - CODZIENNIE, bo ksiegowosc czeka na konkretna
+//    poprawke i zwleka z zamknieciem miesiaca, a nie na pierwsze wypelnienie.
+// Odstep liczy sie od OSTATNIEGO przypomnienia dla danej ewidencji, a nie od sztywnego
+// dnia tygodnia.
 //
 // Ksiegowosc nie dostaje przypomnien: to kierownik ma cos do zrobienia.
+//
+// Kazda wysylka - udana i nieudana - trafia do dziennika email_log (patrz dziennik.ts),
+// zeby ksiegowosc mogla sprawdzic, kto i kiedy co dostal.
 import { createClient } from 'jsr:@supabase/supabase-js@2'
 import { SMTPClient } from 'https://deno.land/x/denomailer@1.6.0/mod.ts'
+import { opisBledu, zapiszWDzienniku } from './dziennik.ts'
+
+// Parametry SMTP z sekretow, zeby zmiana skrzynki nadawczej nie wymagala zmiany kodu.
+// Domyslnie Gmail - tak dziala potok raportowy (smtp.gmail.com:587). Dla firmowej
+// skrzynki w home.pl wystarczy ustawic SMTP_HOST i SMTP_PORT w sekretach funkcji
+// brzegowych; dokladna nazwa serwera jest w panelu home.pl albo w mailu powitalnym
+// (przy wlasnym certyfikacie SSL dla domeny bywa to po prostu bioerg.pl).
+// Loginem w home.pl jest PELNY adres e-mail, nie sama nazwa konta.
+const SMTP_HOST = Deno.env.get('SMTP_HOST') ?? 'smtp.gmail.com'
+const SMTP_PORT = Number(Deno.env.get('SMTP_PORT') ?? '465')
+const SMTP_SZYFROWANIE_OD_RAZU = SMTP_PORT === 465
+const SMTP_LOGIN = Deno.env.get('EMAIL_USER') ?? ''
+const SMTP_HASLO = Deno.env.get('EMAIL_PASS') ?? ''
+
+/** Czy skrzynka nadawcza jest w ogole skonfigurowana. Do 2026-10-20 sekretow EMAIL_USER
+ *  i EMAIL_PASS nie bylo wcale, wiec z aplikacji nie wyszedl ani jeden mail - a denomailer
+ *  wywracal sie wtedy na nieczytelnym "Cannot read properties of undefined (reading
+ *  'mail')". Sprawdzamy to PRZED proba wysylki i zapisujemy czytelny powod w dzienniku. */
+function brakKonfiguracjiSMTP() {
+  if (SMTP_LOGIN && SMTP_HASLO) return null
+  return `Brak konfiguracji skrzynki nadawczej: ` +
+    `EMAIL_USER ${SMTP_LOGIN ? 'ustawiony' : 'BRAK'}, ` +
+    `EMAIL_PASS ${SMTP_HASLO ? 'ustawiony' : 'BRAK'}. ` +
+    `Ustaw sekrety funkcji brzegowych w panelu Supabase.`
+}
 
 const MIESIACE_PL = [
   'Styczeń', 'Luty', 'Marzec', 'Kwiecień', 'Maj', 'Czerwiec',
@@ -14,6 +46,23 @@ const MIESIACE_PL = [
 
 const ADRES_APLIKACJI = 'https://aitaxconsultinglu.github.io/Bioerg-ewidencja-VAT/'
 const ODSTEP_DNI = 2
+
+/** Ewidencje odeslane do poprawki ponaglamy codziennie. Prog 20 godzin, a nie 24, zeby
+ *  przesuniecie uruchomienia o kilka minut nie kazalo czekac calej doby. */
+const ODSTEP_GODZIN_POPRAWKA = 20
+
+/** O ktorej godzinie CZASU POLSKIEGO wychodza maile. */
+const GODZINA_WYSYLKI = 6
+
+/** Godzina w strefie Europe/Warsaw. pg_cron zna wylacznie UTC i nie obsluguje zmiany
+ *  czasu, dlatego zadanie chodzi o 04:30 i 05:30 UTC, a ten warunek przepuszcza tylko
+ *  to uruchomienie, ktore faktycznie wypada o 6:xx w Polsce - czyli latem pierwsze,
+ *  zima drugie. Bez tego godzina wysylki wedrowalaby miedzy 6:30 i 7:30 dwa razy w roku. */
+function godzinaWPolsce(d: Date) {
+  return Number(new Intl.DateTimeFormat('pl-PL', {
+    timeZone: 'Europe/Warsaw', hour: '2-digit', hour12: false,
+  }).format(d))
+}
 
 /** Kopia kazdego przypomnienia, zeby bylo widac kto i o co jest ponaglany bez
  *  zagladania do logow funkcji. */
@@ -68,11 +117,27 @@ function terminRoboczy(dniRoboczych: number) {
   return `${String(d.getUTCDate()).padStart(2, '0')}.${String(d.getUTCMonth() + 1).padStart(2, '0')}.${d.getUTCFullYear()}`
 }
 
-Deno.serve(async () => {
+Deno.serve(async (req) => {
+  // { wymuszone: true } pomija warunek godziny - do recznego uruchomienia z panelu albo
+  // z tej sesji. Zakaz niedziel i swiat obowiazuje nadal, takze przy wymuszeniu.
+  let wymuszone = false
+  try {
+    const cialo = await req.json()
+    wymuszone = cialo?.wymuszone === true
+  } catch {
+    wymuszone = false
+  }
+
   // Poniedzialek-sobota, z pominieciem swiat. Zadanie cron chodzi tez w te dni, ale
   // sprawdzamy to rowniez tutaj: dzien wolny zalezy od daty (Wielkanoc, Boze Cialo),
   // czego harmonogram cron nie wyrazi, a przy recznym wywolaniu crona i tak nie ma.
   const dzis = new Date()
+  if (!wymuszone && godzinaWPolsce(dzis) !== GODZINA_WYSYLKI) {
+    return new Response(JSON.stringify({
+      wyslano: 0,
+      powod: `nie ta godzina (w Polsce ${godzinaWPolsce(dzis)}:xx, wysylamy o ${GODZINA_WYSYLKI}:30)`,
+    }), { headers: { 'Content-Type': 'application/json' } })
+  }
   if (dzis.getUTCDay() === 0) {
     return new Response(JSON.stringify({ wyslano: 0, powod: 'niedziela' }), {
       headers: { 'Content-Type': 'application/json' },
@@ -84,12 +149,21 @@ Deno.serve(async () => {
     })
   }
 
+  const brak = brakKonfiguracjiSMTP()
+  if (brak) {
+    console.error(brak)
+    return new Response(JSON.stringify({ wyslano: 0, powod: brak }), {
+      status: 500, headers: { 'Content-Type': 'application/json' },
+    })
+  }
+
   const supabase = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   )
 
-  const prog = new Date(Date.now() - ODSTEP_DNI * 86_400_000)
+  const progNiewyslane = new Date(Date.now() - ODSTEP_DNI * 86_400_000)
+  const progPoprawki = new Date(Date.now() - ODSTEP_GODZIN_POPRAWKA * 3_600_000)
 
   // Ponaglamy WYLACZNIE najnowszy zaimportowany okres. Bez tego ograniczenia zadanie
   // sciagaloby kierownika takze za miesiace sprzed pol roku, mieszajac je w jednym
@@ -124,16 +198,25 @@ Deno.serve(async () => {
     // Odstep liczymy od ostatniego przypomnienia, a jesli go nie bylo - od powiadomienia
     // o nowej ewidencji (albo od jej utworzenia, gdy powiadomienie nie poszlo).
     const odniesienie = e.last_reminder_sent_at ?? e.powiadomienie_wyslane_at ?? e.utworzono
+    const prog = e.status === 'odeslana_do_poprawki' ? progPoprawki : progNiewyslane
     return new Date(odniesienie) < prog
   })
 
-  const wgKierownika = new Map<string, { logi: string[]; pozycje: string[] }>()
+  // Pozycje rozdzielone na dwie listy, bo w mailu znacza co innego: jedna to "jeszcze
+  // tego nie oddales", druga to "ksiegowosc odeslala i czeka na poprawke".
+  const wgKierownika = new Map<string, {
+    logi: string[]; pozycje: string[]; poprawki: string[]; pojazdy: string[]
+  }>()
   for (const e of doWyslania) {
     const pojazd = (e as unknown as { vehicles: { nr_rejestracyjny: string; kierownik_id: string | null } }).vehicles
     if (!pojazd?.kierownik_id) continue
-    const wpis = wgKierownika.get(pojazd.kierownik_id) ?? { logi: [], pozycje: [] }
+    const wpis = wgKierownika.get(pojazd.kierownik_id)
+      ?? { logi: [], pozycje: [], poprawki: [], pojazdy: [] }
     wpis.logi.push(e.id)
-    wpis.pozycje.push(`${pojazd.nr_rejestracyjny} (${MIESIACE_PL[e.miesiac - 1]} ${e.rok})`)
+    wpis.pojazdy.push(pojazd.nr_rejestracyjny)
+    const opis = `${pojazd.nr_rejestracyjny} (${MIESIACE_PL[e.miesiac - 1]} ${e.rok})`
+    if (e.status === 'odeslana_do_poprawki') wpis.poprawki.push(opis)
+    else wpis.pozycje.push(opis)
     wgKierownika.set(pojazd.kierownik_id, wpis)
   }
 
@@ -145,10 +228,11 @@ Deno.serve(async () => {
 
   const klient = new SMTPClient({
     connection: {
-      hostname: 'smtp.gmail.com',
-      port: 587,
-      tls: false,
-      auth: { username: Deno.env.get('EMAIL_USER')!, password: Deno.env.get('EMAIL_PASS')! },
+      hostname: SMTP_HOST,
+      port: SMTP_PORT,
+      // Port 465 szyfruje od pierwszego bajtu (implicit TLS), 587 negocjuje STARTTLS.
+      tls: SMTP_SZYFROWANIE_OD_RAZU,
+      auth: { username: SMTP_LOGIN, password: SMTP_HASLO },
     },
   })
 
@@ -161,37 +245,74 @@ Deno.serve(async () => {
     if (!profil?.email) continue
 
     const lista = [...new Set(wpis.pozycje)].sort()
+    const poprawki = [...new Set(wpis.poprawki)].sort()
+    const pojazdy = [...new Set(wpis.pojazdy)].sort()
+
+    // Poprawka jest pilniejsza od pierwszego wypelnienia - ksiegowosc juz czeka -
+    // dlatego ona decyduje o temacie wiadomosci.
+    const temat = poprawki.length
+      ? 'Pilne: ewidencja przebiegu pojazdu odesłana do poprawki'
+      : `Przypomnienie: uzupełnij ewidencję przebiegu pojazdu (termin: ${termin})`
+
+    const tresc = [`Dzień dobry${profil.imie_nazwisko ? ', ' + profil.imie_nazwisko : ''},`, '']
+    if (poprawki.length) {
+      tresc.push(
+        'księgowość odesłała do poprawki poniższe ewidencje przebiegu i czeka na zmiany:',
+        ...poprawki.map((x) => `  - ${x}`),
+        '',
+        'Treść uwag księgowości widać w aplikacji, w nagłówku każdej z tych ewidencji.',
+        'Po naniesieniu poprawek prosimy wysłać ewidencję ponownie do akceptacji.',
+        '',
+        'To przypomnienie będziemy powtarzać CODZIENNIE, dopóki ewidencja nie wróci',
+        'do akceptacji.',
+        '',
+      )
+    }
+    if (lista.length) {
+      tresc.push(
+        'Poniższe ewidencje przebiegu nie zostały jeszcze wysłane do akceptacji:',
+        ...lista.map((x) => `  - ${x}`),
+        '',
+        'Prosimy o uzupełnienie celu wyjazdu oraz imienia i nazwiska osoby kierującej',
+        `pojazdem, podpisanie i wysłanie do akceptacji w terminie do ${termin}`,
+        '(dwa dni robocze).',
+        '',
+        'Jeżeli ewidencja nie zostanie wysłana, przypomnienie powtórzymy za dwa dni.',
+        '',
+      )
+    }
+    tresc.push(`Aplikacja: ${ADRES_APLIKACJI}`, '', 'Pozdrawiamy,', 'AI Tax Consulting Sp. z o.o.')
+
+    const kopia = profil.email === KOPIA_PRZYPOMNIEN ? null : KOPIA_PRZYPOMNIEN
+    const wpisDziennika = {
+      rodzaj: 'przypomnienie',
+      adresat: profil.email,
+      adresat_nazwa: profil.imie_nazwisko,
+      profil_id: kierownikId,
+      kopia,
+      temat,
+      pojazdy,
+      rok: najnowszy.rok,
+      miesiac: najnowszy.miesiac,
+    }
     try {
       await klient.send({
         from: Deno.env.get('EMAIL_USER')!,
         to: profil.email,
         // Nie dubluj, gdyby ponaglany byl sam adres kopii.
-        cc: profil.email === KOPIA_PRZYPOMNIEN ? undefined : KOPIA_PRZYPOMNIEN,
-        subject: `Przypomnienie: uzupełnij ewidencję przebiegu pojazdu (termin: ${termin})`,
-        content: [
-          `Dzień dobry${profil.imie_nazwisko ? ', ' + profil.imie_nazwisko : ''},`,
-          '',
-          'przypominamy, że poniższe ewidencje przebiegu nie zostały jeszcze wysłane',
-          'do akceptacji:',
-          ...lista.map((p) => `  - ${p}`),
-          '',
-          'Prosimy o uzupełnienie celu wyjazdu oraz imienia i nazwiska osoby kierującej',
-          `pojazdem, podpisanie i wysłanie do akceptacji w terminie do ${termin}`,
-          '(dwa dni robocze).',
-          '',
-          `Aplikacja: ${ADRES_APLIKACJI}`,
-          '',
-          'Jeżeli ewidencja nie zostanie wysłana, przypomnienie powtórzymy za dwa dni.',
-          '',
-          'Pozdrawiamy,',
-          'AI Tax Consulting Sp. z o.o.',
-        ].join('\n'),
+        cc: kopia ?? undefined,
+        subject: temat,
+        content: tresc.join('\n'),
       })
       await supabase.from('monthly_logs')
         .update({ last_reminder_sent_at: new Date().toISOString() }).in('id', wpis.logi)
+      await zapiszWDzienniku(supabase, { ...wpisDziennika, status: 'wyslany' })
       wyslano++
     } catch (err) {
       console.error(`Nie udalo sie wyslac przypomnienia do ${profil.email}:`, err)
+      await zapiszWDzienniku(supabase, {
+        ...wpisDziennika, status: 'blad', blad: opisBledu(err),
+      })
     }
   }
 
