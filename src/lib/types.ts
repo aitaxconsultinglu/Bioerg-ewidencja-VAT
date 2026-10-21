@@ -73,6 +73,22 @@ export interface WpisAudytu {
 /** Kolumny, które kierownik może edytować. Data, km i Lp. pochodzą z potoku GPS. */
 export type PoleEdytowalne = 'cel_wyjazdu' | 'skad' | 'dokad' | 'kierowca'
 
+/** Pole wskazane przez księgowość do poprawy.
+ *
+ *  Nie ma tu znacznika "poprawione" - stan wynika z porównania bieżącej wartości pola
+ *  z `wartosc_przy_oznaczeniu`. Równe = jeszcze nie poprawione (czerwone), różne =
+ *  poprawione (zielone). Dzięki temu kierownik nie może "zaliczyć" oznaczenia bez
+ *  faktycznej zmiany, a tabela nie potrzebuje polityki UPDATE. */
+export interface OznaczeniePola {
+  id: string
+  log_id: string
+  trip_id: string
+  pole: PoleEdytowalne
+  wartosc_przy_oznaczeniu: string
+  uwaga: string | null
+  oznaczono: string
+}
+
 /** Wpis dziennika wiadomości wychodzących (tabela email_log). Tworzą go wyłącznie
  *  funkcje brzegowe; aplikacja tylko czyta, i tylko jako księgowość (RLS). */
 export interface WpisMaila {

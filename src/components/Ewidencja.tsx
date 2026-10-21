@@ -1,7 +1,9 @@
 import { useCallback, useEffect, useState } from 'react'
 import { ArrowLeft, Download, FileSpreadsheet } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
-import type { Ewidencja as TEwidencja, PoleEdytowalne, Profil, Trasa, WpisAudytu } from '@/lib/types'
+import type {
+  Ewidencja as TEwidencja, OznaczeniePola, PoleEdytowalne, Profil, Trasa, WpisAudytu,
+} from '@/lib/types'
 import {
   ETYKIETY_STATUSU, KOLORY_STATUSU, celDoUzupelnienia,
   dataGodzinaPL, formatujKm, licznik, miesiacRok, sumaKm,
@@ -37,6 +39,8 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
   const [ewidencja, setEwidencja] = useState<TEwidencja | null>(null)
   const [trasy, setTrasy] = useState<Trasa[]>([])
   const [audyt, setAudyt] = useState<WpisAudytu[]>([])
+  const [oznaczenia, setOznaczenia] = useState<OznaczeniePola[]>([])
+  const [trybOznaczania, setTrybOznaczania] = useState(false)
   const [podpis, setPodpis] = useState('')
   const [podpisAkceptacji, setPodpisAkceptacji] = useState('')
   const [tryb, setTryb] = useState<TrybMasowy>('wiersze')
@@ -54,11 +58,16 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
       .from('trips').select('*').eq('log_id', logId).order('lp')
     const { data: a } = await supabase
       .from('audit_log').select('*').eq('log_id', logId).order('utworzono', { ascending: false }).limit(50)
+    // Oznaczenia pol do poprawy. RLS wpuszcza tu ksiegowosc i kierownika tej ewidencji,
+    // wiec jedno zapytanie obsluguje oba widoki.
+    const { data: o } = await supabase
+      .from('oznaczenia_pol').select('*').eq('log_id', logId)
 
     const e = log as TEwidencja
     setEwidencja(e)
     setTrasy((t ?? []) as Trasa[])
     setAudyt((a ?? []) as WpisAudytu[])
+    setOznaczenia((o ?? []) as OznaczeniePola[])
     setPodpis(e?.podpis_imie_nazwisko ?? (profil.rola === 'kierownik' ? profil.imie_nazwisko : ''))
     setPodpisAkceptacji(e?.akceptacja_imie_nazwisko ?? (profil.rola === 'ksiegowosc' ? profil.imie_nazwisko : ''))
     const odczyt = e?.stan_licznika_koniec_rzeczywisty
@@ -78,6 +87,30 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
       await supabase.from('monthly_logs').update({ status: 'w_edycji' }).eq('id', logId)
       setEwidencja((e) => (e ? { ...e, status: 'w_edycji' } : e))
     }
+  }
+
+  /** Wskazuje pole do poprawy albo zdejmuje wskazanie. Tylko ksiegowosc - RLS pilnuje
+   *  tego po stronie bazy, ten warunek jest tylko po to, zeby nie wysylac zapytania,
+   *  ktore i tak zostanie odrzucone. */
+  async function przelaczOznaczenie(trasa: Trasa, pole: PoleEdytowalne) {
+    if (!ksiegowosc) return
+    const istniejace = oznaczenia.find((o) => o.trip_id === trasa.id && o.pole === pole)
+    if (istniejace) {
+      const { error } = await supabase.from('oznaczenia_pol').delete().eq('id', istniejace.id)
+      if (error) { setBlad(error.message); return }
+      setOznaczenia((p) => p.filter((o) => o.id !== istniejace.id))
+      return
+    }
+    const { data, error } = await supabase.from('oznaczenia_pol').insert({
+      log_id: logId,
+      trip_id: trasa.id,
+      pole,
+      // Wartosc z chwili oznaczenia decyduje pozniej o tym, czy pole zostalo poprawione.
+      wartosc_przy_oznaczeniu: String(trasa[pole] ?? ''),
+      oznaczyl: profil.id,
+    }).select().single()
+    if (error) { setBlad(error.message); return }
+    setOznaczenia((p) => [...p, data as OznaczeniePola])
   }
 
   async function zastosujMasowo() {
@@ -398,7 +431,15 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
       )}
 
       <div className="rounded-lg border border-slate-200 bg-white p-4">
-        <TabelaTras trasy={trasy} zablokowana={zablokowana} zapisz={zapiszKomorke} />
+        <TabelaTras
+          trasy={trasy}
+          zablokowana={zablokowana}
+          zapisz={zapiszKomorke}
+          // Po akceptacji ewidencja jest dokumentem, a nie lista uwag - kolory znikaja.
+          oznaczenia={zablokowana ? [] : oznaczenia}
+          trybOznaczania={trybOznaczania}
+          przelaczOznaczenie={przelaczOznaczenie}
+        />
       </div>
 
       <div className="flex flex-wrap items-end justify-between gap-4 rounded-lg border border-slate-200 bg-white p-4">
@@ -459,11 +500,24 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
                 className="mt-1 w-72 rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blekit focus:outline-none"
               />
             </div>
-            <div className="flex gap-3">
-              <Button wariant="glowny" disabled={zajety} onClick={zaakceptuj}>
+            <div className="flex flex-wrap gap-3">
+              <Button wariant="glowny" disabled={zajety || trybOznaczania} onClick={zaakceptuj}>
                 Zaakceptuj i wygeneruj PDF
               </Button>
-              <Button wariant="ostrzezenie" disabled={zajety} onClick={() => setOknoPoprawki(true)}>
+              <Button
+                wariant={trybOznaczania ? 'akcent' : 'zwykly'}
+                disabled={zajety}
+                onClick={() => setTrybOznaczania((w) => !w)}
+              >
+                {trybOznaczania
+                  ? 'Zakończ wskazywanie pól'
+                  : `Wskaż pola do poprawy${oznaczenia.length ? ` (${oznaczenia.length})` : ''}`}
+              </Button>
+              <Button
+                wariant="ostrzezenie"
+                disabled={zajety || trybOznaczania}
+                onClick={() => setOknoPoprawki(true)}
+              >
                 Odeślij do poprawki
               </Button>
             </div>
