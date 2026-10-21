@@ -95,6 +95,11 @@ export const ETYKIETY_RODZAJU_MAILA: Record<string, string> = {
   przypomnienie: 'Przypomnienie',
   przypomnienie_podglad: 'Przypomnienie (podgląd testowy)',
   poprawka: 'Odesłanie do poprawki',
+  poprawka_podglad: 'Odesłanie do poprawki (podgląd testowy)',
+  do_akceptacji: 'Wysłana do akceptacji - księgowość',
+  do_akceptacji_podglad: 'Wysłana do akceptacji (podgląd testowy)',
   nowa_ewidencja: 'Nowa ewidencja - kierownik',
+  nowa_ewidencja_podglad: 'Nowa ewidencja - kierownik (podgląd testowy)',
   nowa_ewidencja_ksiegowosc: 'Nowa ewidencja - księgowość',
+  nowa_ewidencja_ksiegowosc_podglad: 'Nowa ewidencja - księgowość (podgląd testowy)',
 }

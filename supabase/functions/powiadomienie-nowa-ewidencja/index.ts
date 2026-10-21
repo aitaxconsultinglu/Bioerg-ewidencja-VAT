@@ -1,37 +1,49 @@
-// Powiadomienie "ewidencja za poprzedni miesiac jest gotowa". Uruchamiane przez pg_cron
-// 2. dnia miesiaca, juz po nocnym przebiegu potoku z 1. dnia.
+// Powiadomienie "ewidencja za poprzedni miesiac jest gotowa".
 //
-// Kierownik dostaje spis SWOICH pojazdow, ksiegowosc - zbiorcze zestawienie. Bez rok/
-// miesiac w zadaniu funkcja sama liczy poprzedni miesiac, wiec zadanie cron nie musi
-// znac daty.
+// Wolane przez potok GPS (eksport_supabase.py -> powiadom_kierownikow) zaraz po udanym
+// imporcie danych, czyli 1. dnia miesiaca po przebiegu GitHub Actions. NIE przez pg_cron,
+// jak twierdzil poprzedni komentarz w tym pliku: wiadomosc ma wyjsc w momencie, w ktorym
+// dane faktycznie sa w aplikacji, a nie w sztywno wyznaczonym dniu, kiedy potok moglby
+// jeszcze nie przejsc.
+//
+// Kierownik dostaje spis SWOICH pojazdow, ksiegowosc - zbiorcze zestawienie calego taboru.
+// Bez rok/miesiac w zadaniu funkcja sama liczy poprzedni miesiac.
+//
+// Jednokrotnosc pilnuje kolumna powiadomienie_wyslane_at: ponowne uruchomienie potoku dla
+// tego samego miesiaca nie zawiadomi nikogo drugi raz.
+//
 // Od 2026-10-20 kazda wysylka - udana i nieudana - trafia do dziennika email_log
 // (patrz dziennik.ts), zeby ksiegowosc widziala w aplikacji, kto i kiedy co dostal.
+//
+// Od 2026-10-21 wysylka idzie przez wlasna obsluge SMTP (poczta.ts), a nie przez
+// denomailer. Biblioteka wstawiala naglowki MIME do TRESCI wiadomosci, wiec Gmail
+// pokazywal odbiorcy surowe zrodlo z granicami multipart i "=c5=84" zamiast polskich
+// znakow. To byla ostatnia z czterech funkcji na starej bibliotece - i jedyna, ktorej
+// zepsuty format zobaczylby od razu caly tabor naraz.
 import { createClient } from 'jsr:@supabase/supabase-js@2'
-import { SMTPClient } from 'https://deno.land/x/denomailer@1.6.0/mod.ts'
 import { opisBledu, zapiszWDzienniku } from './dziennik.ts'
+import { wyslijMaila } from './poczta.ts'
 
 // Parametry SMTP z sekretow, zeby zmiana skrzynki nadawczej nie wymagala zmiany kodu.
-// Domyslnie Gmail - tak dziala potok raportowy (smtp.gmail.com:587). Dla firmowej
-// skrzynki w home.pl wystarczy ustawic SMTP_HOST i SMTP_PORT w sekretach funkcji
-// brzegowych; dokladna nazwa serwera jest w panelu home.pl albo w mailu powitalnym
-// (przy wlasnym certyfikacie SSL dla domeny bywa to po prostu bioerg.pl).
-// Loginem w home.pl jest PELNY adres e-mail, nie sama nazwa konta.
 // trim() na nazwie serwera, porcie i loginie: wartosci sekretow wkleja sie recznie,
 // a spacja na koncu jest w panelu niewidoczna. Potwierdzone na realnej konfiguracji
-// 2026-10-21: SMTP_HOST mial koncowa spacje i denomailer odrzucal nazwe komunikatem
-// "invalid host 'serwer2269615.home.pl ': invalid char found in FQDN". Hasla NIE
-// obcinamy - gdyby naprawde konczylo sie spacja, obcinanie zepsuloby logowanie bez
-// zadnego sladu; zamiast tego funkcja test-poczty raportuje jego dlugosc.
+// 2026-10-21: SMTP_HOST mial koncowa spacje i wysylka padala na "invalid char found in
+// FQDN". Hasla NIE obcinamy - gdyby naprawde konczylo sie spacja, obcinanie zepsuloby
+// logowanie bez zadnego sladu.
 const SMTP_HOST = (Deno.env.get('SMTP_HOST') ?? 'smtp.gmail.com').trim()
 const SMTP_PORT = Number((Deno.env.get('SMTP_PORT') ?? '465').trim())
-const SMTP_SZYFROWANIE_OD_RAZU = SMTP_PORT === 465
 const SMTP_LOGIN = (Deno.env.get('EMAIL_USER') ?? '').trim()
 const SMTP_HASLO = Deno.env.get('EMAIL_PASS') ?? ''
 
+/** Kopia kazdego powiadomienia dla kierownika, zeby bylo widac, co wyszlo z automatu,
+ *  bez zagladania do dziennika. Tak samo jak w przypomnieniach. Zbiorczych kopii dla
+ *  ksiegowosci nie dublujemy - to ta sama tresc, tylko o calym taborze. */
+const KOPIA = 'aitaxconsultinglu@gmail.com'
+
 /** Czy skrzynka nadawcza jest w ogole skonfigurowana. Do 2026-10-20 sekretow EMAIL_USER
- *  i EMAIL_PASS nie bylo wcale, wiec z aplikacji nie wyszedl ani jeden mail - a denomailer
- *  wywracal sie wtedy na nieczytelnym "Cannot read properties of undefined (reading
- *  'mail')". Sprawdzamy to PRZED proba wysylki i zapisujemy czytelny powod w dzienniku. */
+ *  i EMAIL_PASS nie bylo wcale, wiec z aplikacji nie wyszedl ani jeden mail. Sprawdzamy
+ *  to PRZED proba wysylki, inaczej w dzienniku pojawiloby sie kilkanascie wpisow z tym
+ *  samym bledem SMTP zamiast jednego czytelnego powodu. */
 function brakKonfiguracjiSMTP() {
   if (SMTP_LOGIN && SMTP_HASLO) return null
   return `Brak konfiguracji skrzynki nadawczej: ` +
@@ -74,16 +86,35 @@ function trescPowiadomienia(imieNazwisko: string, okres: string, pojazdy: string
   ].join('\n')
 }
 
+function odpowiedz(tresc: unknown, status = 200) {
+  return new Response(JSON.stringify(tresc), {
+    status, headers: { 'Content-Type': 'application/json' },
+  })
+}
+
 Deno.serve(async (req) => {
   let rok: number | undefined
   let miesiac: number | undefined
+  // { podglad_na: "adres" } to tryb PODGLADU: wszystko liczy sie na prawdziwych danych,
+  // ale wiadomosci ida na ten jeden adres. Podglad NIE RUSZA powiadomienie_wyslane_at -
+  // inaczej "zuzylby" powiadomienie i prawdziwa wysylka 1. dnia miesiaca by sie nie
+  // odbyla. W dzienniku takie wpisy maja rodzaj z sufiksem _podglad.
+  let podgladNa = ''
+  // Domyslnie podglad wysyla po JEDNEJ probce kazdego wariantu (kierownik + ksiegowosc),
+  // bo tresc rozni sie tylko lista pojazdow, a nie chcemy zasypac skrzynki testujacego
+  // kilkunastoma niemal identycznymi mailami. { podglad_wszyscy: true } wysyla wszystkie.
+  let podgladWszyscy = false
   try {
-    const ciało = await req.json()
-    rok = ciało?.rok
-    miesiac = ciało?.miesiac
+    const cialo = await req.json()
+    rok = cialo?.rok
+    miesiac = cialo?.miesiac
+    podgladNa = String(cialo?.podglad_na ?? '').trim()
+    podgladWszyscy = cialo?.podglad_wszyscy === true
   } catch {
-    // Zadanie cron wola funkcje z pustym cialem - to poprawny przypadek.
+    // Potok wola funkcje z rok/miesiac, ale puste cialo tez jest poprawne - wtedy
+    // liczymy miesiac poprzedni.
   }
+  const podglad = podgladNa !== ''
 
   if (!rok || !miesiac) {
     const teraz = new Date()
@@ -95,9 +126,7 @@ Deno.serve(async (req) => {
   const brak = brakKonfiguracjiSMTP()
   if (brak) {
     console.error(brak)
-    return new Response(JSON.stringify({ wyslano: 0, powod: brak }), {
-      status: 500, headers: { 'Content-Type': 'application/json' },
-    })
+    return odpowiedz({ wyslano: 0, powod: brak }, 500)
   }
 
   const supabase = createClient(
@@ -111,10 +140,10 @@ Deno.serve(async (req) => {
     .eq('rok', rok).eq('miesiac', miesiac)
     .is('powiadomienie_wyslane_at', null)
 
-  if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500 })
+  if (error) return odpowiedz({ error: error.message }, 500)
   if (!ewidencje?.length) {
-    return new Response(JSON.stringify({ wyslano: 0, powod: 'brak nowych ewidencji' }), {
-      headers: { 'Content-Type': 'application/json' },
+    return odpowiedz({
+      wyslano: 0, rok, miesiac, powod: 'brak nowych ewidencji',
     })
   }
 
@@ -128,51 +157,61 @@ Deno.serve(async (req) => {
     wgKierownika.set(pojazd.kierownik_id, wpis)
   }
 
-  const klient = new SMTPClient({
-    connection: {
-      hostname: SMTP_HOST,
-      port: SMTP_PORT,
-      // Port 465 szyfruje od pierwszego bajtu (implicit TLS), 587 negocjuje STARTTLS.
-      tls: SMTP_SZYFROWANIE_OD_RAZU,
-      auth: { username: SMTP_LOGIN, password: SMTP_HASLO },
-    },
-  })
-
-  const nadawca = SMTP_LOGIN
   const okres = `${MIESIACE_PL[miesiac - 1]} ${rok}`
   const temat = `Ewidencja przebiegu pojazdu za ${okres} jest gotowa do uzupełnienia`
   let doKierownikow = 0
   let doKsiegowosci = 0
+  const bledy: string[] = []
 
   for (const [kierownikId, wpis] of wgKierownika) {
+    const lista = [...new Set(wpis.pojazdy)].sort()
     const { data: profil } = await supabase
       .from('profiles').select('email, imie_nazwisko').eq('id', kierownikId).single()
-    if (!profil?.email) continue
+    if (!profil?.email) {
+      // Kierownik bez adresu to powod, dla ktorego ewidencja nie zostanie podjeta -
+      // musi byc widoczny w dzienniku, a nie tylko w logach funkcji.
+      await zapiszWDzienniku(supabase, {
+        rodzaj: 'nowa_ewidencja', adresat: '(brak adresu e-mail)', profil_id: kierownikId,
+        temat, pojazdy: lista, rok, miesiac,
+        status: 'blad', blad: 'Kierownik nie ma zapisanego adresu e-mail',
+      })
+      continue
+    }
+    // W podgladzie wystarczy jedna probka wariantu "kierownik".
+    if (podglad && !podgladWszyscy && doKierownikow > 0) continue
 
-    const lista = [...new Set(wpis.pojazdy)].sort()
+    const odbiorca = podglad ? podgladNa : profil.email
+    const kopia = podglad || profil.email === KOPIA ? null : KOPIA
+    // Prefiks z adresem kierownika, zeby w podgladzie bylo widac, czyj to mial byc mail.
+    const tematWysylki = podglad ? `[PODGLĄD dla ${profil.email}] ${temat}` : temat
     const wpisDziennika = {
-      rodzaj: 'nowa_ewidencja',
-      adresat: profil.email,
+      rodzaj: podglad ? 'nowa_ewidencja_podglad' : 'nowa_ewidencja',
+      adresat: odbiorca,
       adresat_nazwa: profil.imie_nazwisko,
       profil_id: kierownikId,
-      temat,
+      kopia,
+      temat: tematWysylki,
       pojazdy: lista,
       rok,
       miesiac,
     }
     try {
-      await klient.send({
-        from: nadawca,
-        to: profil.email,
-        subject: temat,
-        content: trescPowiadomienia(profil.imie_nazwisko ?? '', okres, lista),
+      await wyslijMaila({
+        host: SMTP_HOST, port: SMTP_PORT, login: SMTP_LOGIN, haslo: SMTP_HASLO,
+        od: SMTP_LOGIN, do_: odbiorca, kopia,
+        temat: tematWysylki,
+        tresc: trescPowiadomienia(profil.imie_nazwisko ?? '', okres, lista),
       })
-      await supabase.from('monthly_logs')
-        .update({ powiadomienie_wyslane_at: new Date().toISOString() }).in('id', wpis.logi)
+      // Znacznik stawiamy DOPIERO po udanej wysylce i NIGDY w podgladzie.
+      if (!podglad) {
+        await supabase.from('monthly_logs')
+          .update({ powiadomienie_wyslane_at: new Date().toISOString() }).in('id', wpis.logi)
+      }
       await zapiszWDzienniku(supabase, { ...wpisDziennika, status: 'wyslany' })
       doKierownikow++
     } catch (err) {
-      console.error(`Nie udalo sie powiadomic kierownika ${profil.email}:`, err)
+      console.error(`Nie udalo sie powiadomic kierownika ${profil.email}:`, opisBledu(err))
+      bledy.push(`${profil.email}: ${opisBledu(err)}`)
       await zapiszWDzienniku(supabase, {
         ...wpisDziennika, status: 'blad', blad: opisBledu(err),
       })
@@ -188,40 +227,48 @@ Deno.serve(async (req) => {
   )].sort()
 
   const { data: ksiegowi } = await supabase
-    .from('profiles').select('email, imie_nazwisko').eq('rola', 'ksiegowosc')
+    .from('profiles').select('id, email, imie_nazwisko').eq('rola', 'ksiegowosc')
 
   for (const k of ksiegowi ?? []) {
     if (!k.email) continue
+    // W podgladzie wystarczy jedna probka wariantu "ksiegowosc".
+    if (podglad && !podgladWszyscy && doKsiegowosci > 0) continue
+
+    const odbiorca = podglad ? podgladNa : k.email
+    const tematWysylki = podglad ? `[PODGLĄD dla ${k.email}] ${temat}` : temat
     // Rodzaj 'nowa_ewidencja_ksiegowosc', zeby w dzienniku dalo sie odfiltrowac maile
     // do kierownikow od zbiorczej kopii dla ksiegowosci.
     const wpisDziennika = {
-      rodzaj: 'nowa_ewidencja_ksiegowosc',
-      adresat: k.email,
+      rodzaj: podglad ? 'nowa_ewidencja_ksiegowosc_podglad' : 'nowa_ewidencja_ksiegowosc',
+      adresat: odbiorca,
       adresat_nazwa: k.imie_nazwisko,
-      temat,
+      profil_id: k.id,
+      temat: tematWysylki,
       pojazdy: wszystkiePojazdy,
       rok,
       miesiac,
     }
     try {
-      await klient.send({
-        from: nadawca,
-        to: k.email,
-        subject: temat,
-        content: trescPowiadomienia(k.imie_nazwisko ?? '', okres, wszystkiePojazdy),
+      await wyslijMaila({
+        host: SMTP_HOST, port: SMTP_PORT, login: SMTP_LOGIN, haslo: SMTP_HASLO,
+        od: SMTP_LOGIN, do_: odbiorca,
+        temat: tematWysylki,
+        tresc: trescPowiadomienia(k.imie_nazwisko ?? '', okres, wszystkiePojazdy),
       })
       await zapiszWDzienniku(supabase, { ...wpisDziennika, status: 'wyslany' })
       doKsiegowosci++
     } catch (err) {
-      console.error(`Nie udalo sie powiadomic ksiegowosci ${k.email}:`, err)
+      console.error(`Nie udalo sie powiadomic ksiegowosci ${k.email}:`, opisBledu(err))
+      bledy.push(`${k.email}: ${opisBledu(err)}`)
       await zapiszWDzienniku(supabase, {
         ...wpisDziennika, status: 'blad', blad: opisBledu(err),
       })
     }
   }
 
-  try { await klient.close() } catch { /* polaczenie moglo nie powstac */ }
-  return new Response(JSON.stringify({ okres, doKierownikow, doKsiegowosci }), {
-    headers: { 'Content-Type': 'application/json' },
+  return odpowiedz({
+    okres, doKierownikow, doKsiegowosci,
+    podglad: podglad ? podgladNa : undefined,
+    bledy: bledy.length ? bledy : undefined,
   })
 })
