@@ -7,8 +7,8 @@
 // tłumiła wyjątek, więc księgowość nie miała jak stwierdzić, czy kierownik dostał
 // wiadomość, czy wysyłka przepadła.
 import { createClient } from 'jsr:@supabase/supabase-js@2'
-import { SMTPClient } from 'https://deno.land/x/denomailer@1.6.0/mod.ts'
 import { opisBledu, zapiszWDzienniku } from './dziennik.ts'
+import { wyslijMaila } from './poczta.ts'
 
 // Parametry SMTP z sekretow, zeby zmiana skrzynki nadawczej nie wymagala zmiany kodu.
 // Domyslnie Gmail - tak dziala potok raportowy (smtp.gmail.com:587). Dla firmowej
@@ -24,7 +24,6 @@ import { opisBledu, zapiszWDzienniku } from './dziennik.ts'
 // zadnego sladu; zamiast tego funkcja test-poczty raportuje jego dlugosc.
 const SMTP_HOST = (Deno.env.get('SMTP_HOST') ?? 'smtp.gmail.com').trim()
 const SMTP_PORT = Number((Deno.env.get('SMTP_PORT') ?? '465').trim())
-const SMTP_SZYFROWANIE_OD_RAZU = SMTP_PORT === 465
 const SMTP_LOGIN = (Deno.env.get('EMAIL_USER') ?? '').trim()
 const SMTP_HASLO = Deno.env.get('EMAIL_PASS') ?? ''
 
@@ -55,8 +54,12 @@ function odpowiedz(tresc: unknown, status = 200) {
 }
 
 Deno.serve(async (req) => {
-  const { log_id } = await req.json()
+  // { podglad_na: "adres" } przekierowuje wiadomosc na podany adres zamiast do
+  // kierownika - do sprawdzenia formatu bez zawracania glowy prawdziwym odbiorcom.
+  const { log_id, podglad_na } = await req.json()
   if (!log_id) return odpowiedz({ error: 'Brak log_id' }, 400)
+  const podgladNa = String(podglad_na ?? '').trim()
+  const podglad = podgladNa !== ''
 
   const supabase = createClient(
     Deno.env.get('SUPABASE_URL')!,
@@ -98,39 +101,33 @@ Deno.serve(async (req) => {
   const temat =
     `Ewidencja przebiegu pojazdu ${pojazd.nr_rejestracyjny} za ${okres} - odesłana do poprawki`
 
+  // W podgladzie wiadomosc idzie na wskazany adres, a nie do kierownika, i dostaje
+  // prefiks z jego adresem, zeby bylo widac, czyj to mial byc mail.
+  const odbiorca = podglad ? podgladNa : profil.email
+  const tematWysylki = podglad ? `[PODGLĄD dla ${profil.email}] ${temat}` : temat
+  const wpis = {
+    rodzaj: podglad ? 'poprawka_podglad' : 'poprawka',
+    adresat: odbiorca,
+    adresat_nazwa: profil.imie_nazwisko,
+    profil_id: pojazd.kierownik_id,
+    temat: tematWysylki,
+    pojazdy: [pojazd.nr_rejestracyjny],
+    rok: e.rok,
+    miesiac: e.miesiac,
+  }
+
   const brak = brakKonfiguracjiSMTP()
   if (brak) {
-    await zapiszWDzienniku(supabase, {
-      rodzaj: 'poprawka',
-      adresat: profil.email,
-      adresat_nazwa: profil.imie_nazwisko,
-      profil_id: pojazd.kierownik_id,
-      temat,
-      pojazdy: [pojazd.nr_rejestracyjny],
-      rok: e.rok,
-      miesiac: e.miesiac,
-      status: 'blad',
-      blad: brak,
-    })
+    await zapiszWDzienniku(supabase, { ...wpis, status: 'blad', blad: brak })
     return odpowiedz({ error: brak }, 500)
   }
 
-  const klient = new SMTPClient({
-    connection: {
-      hostname: SMTP_HOST,
-      port: SMTP_PORT,
-      // Port 465 szyfruje od pierwszego bajtu (implicit TLS), 587 negocjuje STARTTLS.
-      tls: SMTP_SZYFROWANIE_OD_RAZU,
-      auth: { username: SMTP_LOGIN, password: SMTP_HASLO },
-    },
-  })
-
   try {
-    await klient.send({
-      from: SMTP_LOGIN,
-      to: profil.email,
-      subject: temat,
-      content: [
+    await wyslijMaila({
+      host: SMTP_HOST, port: SMTP_PORT, login: SMTP_LOGIN, haslo: SMTP_HASLO,
+      od: SMTP_LOGIN, do_: odbiorca,
+      temat: tematWysylki,
+      tresc: [
         `Dzień dobry${profil.imie_nazwisko ? ', ' + profil.imie_nazwisko : ''},`,
         '',
         `księgowość odesłała do poprawki ewidencję przebiegu pojazdu ${pojazd.nr_rejestracyjny} za ${okres}.`,
@@ -146,34 +143,11 @@ Deno.serve(async (req) => {
         'automat Bioerg',
       ].join('\n'),
     })
-    await zapiszWDzienniku(supabase, {
-      rodzaj: 'poprawka',
-      adresat: profil.email,
-      adresat_nazwa: profil.imie_nazwisko,
-      profil_id: pojazd.kierownik_id,
-      temat,
-      pojazdy: [pojazd.nr_rejestracyjny],
-      rok: e.rok,
-      miesiac: e.miesiac,
-      status: 'wyslany',
-    })
-    return odpowiedz({ ok: true, adresat: profil.email })
+    await zapiszWDzienniku(supabase, { ...wpis, status: 'wyslany' })
+    return odpowiedz({ ok: true, adresat: odbiorca })
   } catch (err) {
-    await zapiszWDzienniku(supabase, {
-      rodzaj: 'poprawka',
-      adresat: profil.email,
-      adresat_nazwa: profil.imie_nazwisko,
-      profil_id: pojazd.kierownik_id,
-      temat,
-      pojazdy: [pojazd.nr_rejestracyjny],
-      rok: e.rok,
-      miesiac: e.miesiac,
-      status: 'blad',
-      blad: opisBledu(err),
-    })
-    // Zwracamy błąd, żeby aplikacja mogła powiedzieć księgowości, że mail nie wyszedł.
-    return odpowiedz({ error: `Nie udało się wysłać wiadomości: ${opisBledu(err)}` }, 502)
-  } finally {
-    try { await klient.close() } catch { /* polaczenie moglo nie powstac */ }
+    await zapiszWDzienniku(supabase, { ...wpis, status: 'blad', blad: opisBledu(err) })
+    // Zwracamy blad, zeby aplikacja mogla powiedziec ksiegowosci, ze mail nie wyszedl.
+    return odpowiedz({ error: `Nie udalo sie wyslac wiadomosci: ${opisBledu(err)}` }, 502)
   }
 })

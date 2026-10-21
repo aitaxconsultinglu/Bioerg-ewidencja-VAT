@@ -29,8 +29,12 @@ function odpowiedz(tresc: unknown, status = 200) {
 }
 
 Deno.serve(async (req) => {
-  const { log_id } = await req.json()
+  // { podglad_na: "adres" } przekierowuje wszystkie wiadomosci na podany adres zamiast
+  // do ksiegowosci - do sprawdzenia formatu bez zawracania glowy prawdziwym odbiorcom.
+  const { log_id, podglad_na } = await req.json()
   if (!log_id) return odpowiedz({ error: 'Brak log_id' }, 400)
+  const podgladNa = String(podglad_na ?? '').trim()
+  const podglad = podgladNa !== ''
 
   if (!SMTP_LOGIN || !SMTP_HASLO) {
     return odpowiedz({ error: 'Brak konfiguracji skrzynki nadawczej' }, 500)
@@ -75,12 +79,14 @@ Deno.serve(async (req) => {
 
   for (const k of ksiegowi) {
     if (!k.email) continue
+    const odbiorca = podglad ? podgladNa : k.email
+    const tematWysylki = podglad ? `[PODGLĄD dla ${k.email}] ${temat}` : temat
     const wpis = {
-      rodzaj: 'do_akceptacji',
-      adresat: k.email,
+      rodzaj: podglad ? 'do_akceptacji_podglad' : 'do_akceptacji',
+      adresat: odbiorca,
       adresat_nazwa: k.imie_nazwisko,
       profil_id: k.id,
-      temat,
+      temat: tematWysylki,
       pojazdy: [pojazd.nr_rejestracyjny],
       rok: e.rok,
       miesiac: e.miesiac,
@@ -88,8 +94,8 @@ Deno.serve(async (req) => {
     try {
       await wyslijMaila({
         host: SMTP_HOST, port: SMTP_PORT, login: SMTP_LOGIN, haslo: SMTP_HASLO,
-        od: SMTP_LOGIN, do_: k.email,
-        temat,
+        od: SMTP_LOGIN, do_: odbiorca,
+        temat: tematWysylki,
         tresc: [
           `Dzień dobry${k.imie_nazwisko ? ', ' + k.imie_nazwisko : ''},`,
           '',
