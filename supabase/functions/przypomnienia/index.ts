@@ -52,9 +52,12 @@ const MIESIACE_PL = [
 const ADRES_APLIKACJI = 'https://aitaxconsultinglu.github.io/Bioerg-ewidencja-VAT/'
 const ODSTEP_DNI = 2
 
-/** Ewidencje odeslane do poprawki ponaglamy codziennie. Prog 20 godzin, a nie 24, zeby
- *  przesuniecie uruchomienia o kilka minut nie kazalo czekac calej doby. */
-const ODSTEP_GODZIN_POPRAWKA = 20
+/** Odstep dla ewidencji ODESLANYCH DO POPRAWKI. Na zyczenie klienta z 2026-10-21 to
+ *  rowniez co dwa dni, tak samo jak dla niewyslanych - wczesniej bylo codziennie.
+ *  44 godziny, a nie 48, zeby przesuniecie uruchomienia o kilka minut nie kazalo czekac
+ *  dodatkowej doby: przypomnienie wyslane o 6:30 ma sie powtorzyc co drugi dzien
+ *  o 6:30, a nie co drugi dzien o 6:31. */
+const ODSTEP_GODZIN_POPRAWKA = 44
 
 /** O ktorej godzinie CZASU POLSKIEGO wychodza maile. */
 const GODZINA_WYSYLKI = 6
@@ -269,7 +272,7 @@ Deno.serve(async (req) => {
         'Treść uwag księgowości widać w aplikacji, w nagłówku każdej z tych ewidencji.',
         'Po naniesieniu poprawek prosimy wysłać ewidencję ponownie do akceptacji.',
         '',
-        'To przypomnienie będziemy powtarzać CODZIENNIE, dopóki ewidencja nie wróci',
+        'To przypomnienie będziemy powtarzać co dwa dni, dopóki ewidencja nie wróci',
         'do akceptacji.',
         '',
       )

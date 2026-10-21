@@ -142,6 +142,12 @@ export async function wyslijMaila(w: Wiadomosc) {
       ...(w.kopia ? [`Cc: ${w.kopia}`] : []),
       `Subject: ${naglowek(w.temat)}`,
       `Date: ${new Date().toUTCString()}`,
+      // Message-ID jest OBOWIAZKOWY. Bez niego Gmail nie ma jak rozroznic wiadomosci
+      // i sklada w jeden watek maile, ktore nie maja ze soba nic wspolnego - klient
+      // zglosil 2026-10-21, ze przypomnienia dla dwoch roznych kierownikow pokazaly sie
+      // jako jedna, podwojna wiadomosc. Brak tego naglowka obniza tez dostarczalnosc,
+      // bo czesc serwerow traktuje go jako oznake spamu.
+      `Message-ID: <${crypto.randomUUID()}@${w.od.split('@')[1] ?? 'localhost'}>`,
       'MIME-Version: 1.0',
       // Jeden, prosty blok tekstowy. Zadna wiadomosc w tej aplikacji nie ma zalacznikow
       // ani wersji HTML, wiec multipart tylko dodawalby miejsca na blad - dokladnie taki,

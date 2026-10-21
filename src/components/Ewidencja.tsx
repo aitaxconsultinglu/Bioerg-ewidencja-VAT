@@ -145,6 +145,21 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
       podpis_by: profil.id,
       komentarz_ksiegowosci: null,
     }).eq('id', logId)
+
+    if (!error) {
+      // Zawiadomienie księgowości, że coś na nią czeka. Błąd wysyłki NIE cofa wysłania
+      // ewidencji - status jest już zapisany, a kierownik nie ma wpływu na pocztę.
+      // Zamiast tłumić błąd po cichu (tak było z powiadomieniem o poprawce i przez
+      // miesiąc nikt nie wiedział, że poczta nie działa) pokazujemy go kierownikowi
+      // jako ostrzeżenie - ewidencja jest wysłana, ale warto dać znać księgowości.
+      const { error: bladMaila } = await supabase.functions
+        .invoke('powiadomienie-do-akceptacji', { body: { log_id: logId } })
+      if (bladMaila) {
+        setBlad('Ewidencja została wysłana do akceptacji, ale nie udało się powiadomić '
+              + 'księgowości e-mailem. Warto poinformować ją bezpośrednio.')
+      }
+    }
+
     setZajety(false)
     if (error) setBlad(error.message)
     else await wczytaj()
