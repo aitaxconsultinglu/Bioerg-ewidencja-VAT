@@ -211,15 +211,29 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
       komentarz_ksiegowosci: komentarz,
     }).eq('id', logId)
 
+    // Błąd wysyłki maila NIE cofa odesłania do poprawki - status jest już w bazie,
+    // a mail to tylko zawiadomienie. Ale księgowość musi o nim wiedzieć, inaczej będzie
+    // czekać na poprawkę, o której kierownik nie ma pojęcia. Do 2026-10-21 wyjątek był
+    // tu tłumiony przez `.catch(() => undefined)`, więc nieudana wysyłka wyglądała
+    // dokładnie tak samo jak udana - a wysyłka nie udawała się NIGDY, bo funkcja nie
+    // odpowiadała na zapytanie wstępne przeglądarki i ta blokowała wywołanie.
+    let bladMaila: string | null = null
     if (!error) {
-      await supabase.functions.invoke('powiadomienie-poprawka', { body: { log_id: logId } })
-        .catch(() => undefined)
+      const { error: bladFunkcji } = await supabase.functions
+        .invoke('powiadomienie-poprawka', { body: { log_id: logId } })
+      if (bladFunkcji) bladMaila = bladFunkcji.message
     }
     setZajety(false)
     setOknoPoprawki(false)
     setKomentarz('')
     if (error) setBlad(error.message)
-    else await wczytaj()
+    else {
+      if (bladMaila) {
+        setBlad('Ewidencja została odesłana do poprawki, ale nie udało się powiadomić '
+              + `kierownika e-mailem (${bladMaila}). Warto poinformować go bezpośrednio.`)
+      }
+      await wczytaj()
+    }
   }
 
   async function odblokuj() {

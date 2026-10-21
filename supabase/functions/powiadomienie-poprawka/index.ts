@@ -10,6 +10,9 @@ import { createClient } from 'jsr:@supabase/supabase-js@2'
 import { opisBledu, zapiszWDzienniku } from './dziennik.ts'
 import { wyslijMaila } from './poczta.ts'
 import { stopkaMaila, wczytajUstawienia } from './ustawienia.ts'
+import {
+  czyZapytanieWstepne, odpowiedzJSON as odpowiedz, odpowiedzWstepna, ustalWolajacego,
+} from './brama.ts'
 
 // Parametry SMTP z sekretow, zeby zmiana skrzynki nadawczej nie wymagala zmiany kodu.
 // Domyslnie Gmail - tak dziala potok raportowy (smtp.gmail.com:587). Dla firmowej
@@ -44,25 +47,38 @@ const MIESIACE_PL = [
   'Lipiec', 'Sierpień', 'Wrzesień', 'Październik', 'Listopad', 'Grudzień',
 ]
 
-function odpowiedz(tresc: unknown, status = 200) {
-  return new Response(JSON.stringify(tresc), {
-    status,
-    headers: { 'Content-Type': 'application/json' },
-  })
-}
-
 Deno.serve(async (req) => {
-  // { podglad_na: "adres" } przekierowuje wiadomosc na podany adres zamiast do
-  // kierownika - do sprawdzenia formatu bez zawracania glowy prawdziwym odbiorcom.
-  const { log_id, podglad_na } = await req.json()
-  if (!log_id) return odpowiedz({ error: 'Brak log_id' }, 400)
-  const podgladNa = String(podglad_na ?? '').trim()
-  const podglad = podgladNa !== ''
+  if (czyZapytanieWstepne(req)) return odpowiedzWstepna()
 
   const supabase = createClient(
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   )
+
+  // Odeslac ewidencje do poprawki moze tylko ksiegowosc, wiec tylko ona ma powod wolac
+  // te funkcje. Do 2026-10-21 wystarczyl klucz publishable z paczki aplikacji.
+  const wolajacy = await ustalWolajacego(req, supabase)
+  const wolnoWolac = wolajacy.rodzaj === 'serwis'
+    || (wolajacy.rodzaj === 'uzytkownik' && wolajacy.rola === 'ksiegowosc')
+  if (!wolnoWolac) return odpowiedz({ error: 'Brak uprawnień do tej operacji.' }, 403)
+
+  let log_id: unknown
+  let podglad_na: unknown
+  try {
+    const cialo = await req.json()
+    log_id = cialo?.log_id
+    podglad_na = cialo?.podglad_na
+  } catch {
+    return odpowiedz({ error: 'Brak log_id' }, 400)
+  }
+  if (!log_id) return odpowiedz({ error: 'Brak log_id' }, 400)
+
+  // { podglad_na: "adres" } przekierowuje wiadomosc na podany adres zamiast do
+  // kierownika - do sprawdzenia formatu bez zawracania glowy prawdziwym odbiorcom.
+  // WYLACZNIE dla wolajacego serwisowego: inaczej ksiegowosc (albo ktos z jej tokenem)
+  // moglaby wyslac dane kierownika na dowolny adres.
+  const podgladNa = wolajacy.rodzaj === 'serwis' ? String(podglad_na ?? '').trim() : ''
+  const podglad = podgladNa !== ''
 
   const ust = await wczytajUstawienia(supabase)
 

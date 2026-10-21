@@ -15,6 +15,9 @@ import { createClient } from 'jsr:@supabase/supabase-js@2'
 import { opisBledu, zapiszWDzienniku } from './dziennik.ts'
 import { wyslijMaila } from './poczta.ts'
 import { stopkaMaila, wczytajUstawienia } from './ustawienia.ts'
+import {
+  czyZapytanieWstepne, odpowiedzJSON, odpowiedzWstepna, tylkoSerwis, ustalWolajacego,
+} from './brama.ts'
 
 // Parametry SMTP z sekretow, zeby zmiana skrzynki nadawczej nie wymagala zmiany kodu.
 // Domyslnie Gmail - tak dziala potok raportowy (smtp.gmail.com:587). Dla firmowej
@@ -121,6 +124,20 @@ function terminRoboczy(dniRoboczych: number) {
 }
 
 Deno.serve(async (req) => {
+  if (czyZapytanieWstepne(req)) return odpowiedzWstepna()
+
+  const supabase = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+  )
+
+  // Te przypomnienia woła wyłacznie zadanie cron. Nikt zalogowany nie ma powodu ich
+  // uruchamiac, a do 2026-10-21 wystarczyl klucz publishable z paczki aplikacji, zeby
+  // wymusic wysylke do calej floty albo przekierowac jej tresc na obcy adres.
+  const wolajacy = await ustalWolajacego(req, supabase)
+  const odmowa = tylkoSerwis(wolajacy)
+  if (odmowa) return odmowa
+
   // { wymuszone: true } pomija warunek godziny - do recznego uruchomienia z panelu albo
   // z tej sesji. Zakaz niedziel i swiat obowiazuje nadal, takze przy wymuszeniu.
   //
@@ -147,34 +164,21 @@ Deno.serve(async (req) => {
   // czego harmonogram cron nie wyrazi, a przy recznym wywolaniu crona i tak nie ma.
   const dzis = new Date()
   if (!wymuszone && godzinaWPolsce(dzis) !== GODZINA_WYSYLKI) {
-    return new Response(JSON.stringify({
+    return odpowiedzJSON({
       wyslano: 0,
       powod: `nie ta godzina (w Polsce ${godzinaWPolsce(dzis)}:xx, wysylamy o ${GODZINA_WYSYLKI}:30)`,
-    }), { headers: { 'Content-Type': 'application/json' } })
-  }
-  if (dzis.getUTCDay() === 0) {
-    return new Response(JSON.stringify({ wyslano: 0, powod: 'niedziela' }), {
-      headers: { 'Content-Type': 'application/json' },
     })
   }
+  if (dzis.getUTCDay() === 0) return odpowiedzJSON({ wyslano: 0, powod: 'niedziela' })
   if (dzienWolny(dzis)) {
-    return new Response(JSON.stringify({ wyslano: 0, powod: 'dzien ustawowo wolny' }), {
-      headers: { 'Content-Type': 'application/json' },
-    })
+    return odpowiedzJSON({ wyslano: 0, powod: 'dzien ustawowo wolny' })
   }
 
   const brak = brakKonfiguracjiSMTP()
   if (brak) {
     console.error(brak)
-    return new Response(JSON.stringify({ wyslano: 0, powod: brak }), {
-      status: 500, headers: { 'Content-Type': 'application/json' },
-    })
+    return odpowiedzJSON({ wyslano: 0, powod: brak }, 500)
   }
-
-  const supabase = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-  )
 
   const ust = await wczytajUstawienia(supabase)
   const KOPIA_PRZYPOMNIEN = ust.kopiaPowiadomien
@@ -195,9 +199,7 @@ Deno.serve(async (req) => {
     .maybeSingle()
 
   if (!najnowszy) {
-    return new Response(JSON.stringify({ wyslano: 0, powod: 'brak jakichkolwiek ewidencji' }), {
-      headers: { 'Content-Type': 'application/json' },
-    })
+    return odpowiedzJSON({ wyslano: 0, powod: 'brak jakichkolwiek ewidencji' })
   }
 
   // Statusy oznaczajace "kierownik jeszcze tego nie oddal". Ewidencja wyslana do
@@ -209,7 +211,7 @@ Deno.serve(async (req) => {
     .eq('miesiac', najnowszy.miesiac)
     .in('status', ['wygenerowana', 'w_edycji', 'odeslana_do_poprawki'])
 
-  if (error) return new Response(JSON.stringify({ error: error.message }), { status: 500 })
+  if (error) return odpowiedzJSON({ error: error.message }, 500)
 
   const doWyslania = (ewidencje ?? []).filter((e) => {
     // Odstep liczymy od ostatniego przypomnienia, a jesli go nie bylo - od powiadomienia
@@ -238,9 +240,7 @@ Deno.serve(async (req) => {
   }
 
   if (wgKierownika.size === 0) {
-    return new Response(JSON.stringify({ wyslano: 0, powod: 'nic nie zalega' }), {
-      headers: { 'Content-Type': 'application/json' },
-    })
+    return odpowiedzJSON({ wyslano: 0, powod: 'nic nie zalega' })
   }
 
   const termin = terminRoboczy(2)
@@ -334,10 +334,8 @@ Deno.serve(async (req) => {
     }
   }
 
-  return new Response(JSON.stringify({
+  return odpowiedzJSON({
     wyslano, termin, podglad: podglad ? podgladNa : undefined,
     okres: `${najnowszy.rok}-${String(najnowszy.miesiac).padStart(2, '0')}`,
-  }), {
-    headers: { 'Content-Type': 'application/json' },
   })
 })

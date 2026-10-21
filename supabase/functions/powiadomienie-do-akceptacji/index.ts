@@ -10,6 +10,9 @@ import { createClient } from 'jsr:@supabase/supabase-js@2'
 import { opisBledu, zapiszWDzienniku } from './dziennik.ts'
 import { wyslijMaila } from './poczta.ts'
 import { stopkaMaila, wczytajUstawienia } from './ustawienia.ts'
+import {
+  czyZapytanieWstepne, odpowiedzJSON as odpowiedz, odpowiedzWstepna, ustalWolajacego,
+} from './brama.ts'
 
 const SMTP_HOST = (Deno.env.get('SMTP_HOST') ?? 'smtp.gmail.com').trim()
 const SMTP_PORT = Number((Deno.env.get('SMTP_PORT') ?? '465').trim())
@@ -21,19 +24,8 @@ const MIESIACE_PL = [
   'Lipiec', 'Sierpień', 'Wrzesień', 'Październik', 'Listopad', 'Grudzień',
 ]
 
-function odpowiedz(tresc: unknown, status = 200) {
-  return new Response(JSON.stringify(tresc), {
-    status, headers: { 'Content-Type': 'application/json' },
-  })
-}
-
 Deno.serve(async (req) => {
-  // { podglad_na: "adres" } przekierowuje wszystkie wiadomosci na podany adres zamiast
-  // do ksiegowosci - do sprawdzenia formatu bez zawracania glowy prawdziwym odbiorcom.
-  const { log_id, podglad_na } = await req.json()
-  if (!log_id) return odpowiedz({ error: 'Brak log_id' }, 400)
-  const podgladNa = String(podglad_na ?? '').trim()
-  const podglad = podgladNa !== ''
+  if (czyZapytanieWstepne(req)) return odpowiedzWstepna()
 
   if (!SMTP_LOGIN || !SMTP_HASLO) {
     return odpowiedz({ error: 'Brak konfiguracji skrzynki nadawczej' }, 500)
@@ -43,6 +35,28 @@ Deno.serve(async (req) => {
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   )
+
+  const wolajacy = await ustalWolajacego(req, supabase)
+  if (wolajacy.rodzaj === 'nikt') {
+    return odpowiedz({ error: 'Brak uprawnień do tej operacji.' }, 403)
+  }
+
+  let log_id: unknown
+  let podglad_na: unknown
+  try {
+    const cialo = await req.json()
+    log_id = cialo?.log_id
+    podglad_na = cialo?.podglad_na
+  } catch {
+    return odpowiedz({ error: 'Brak log_id' }, 400)
+  }
+  if (!log_id) return odpowiedz({ error: 'Brak log_id' }, 400)
+
+  // { podglad_na: "adres" } przekierowuje wiadomosc na podany adres zamiast do
+  // ksiegowosci. WYLACZNIE dla wolajacego serwisowego - inaczej kierownik mogl przez to
+  // wyslac dane dowolnej ewidencji na obcy adres.
+  const podgladNa = wolajacy.rodzaj === 'serwis' ? String(podglad_na ?? '').trim() : ''
+  const podglad = podgladNa !== ''
 
   const ust = await wczytajUstawienia(supabase)
 
@@ -56,6 +70,16 @@ Deno.serve(async (req) => {
   // deno-lint-ignore no-explicit-any
   const pojazd = (e as any)?.vehicles
   if (!e || !pojazd) return odpowiedz({ error: 'Nie znaleziono ewidencji' }, 404)
+
+  // Kierownik moze zawiadomic ksiegowosc wylacznie o SWOJEJ ewidencji. Bez tego warunku
+  // kazdy zalogowany mogl - znajac identyfikator - wywolac powiadomienie o cudzej,
+  // a tresc maila zawiera nazwisko podpisujacego i sume kilometrow.
+  const wlasciciel = wolajacy.rodzaj === 'uzytkownik'
+    && pojazd.kierownik_id === wolajacy.id
+  const wolnoWolac = wolajacy.rodzaj === 'serwis'
+    || wlasciciel
+    || (wolajacy.rodzaj === 'uzytkownik' && wolajacy.rola === 'ksiegowosc')
+  if (!wolnoWolac) return odpowiedz({ error: 'Brak uprawnień do tej operacji.' }, 403)
 
   // Suma kilometrów liczona tu, a nie brana z nagłówka: księgowość ma w mailu od razu
   // widzieć, o jakiej skali przebiegu mówimy, bez wchodzenia do aplikacji.

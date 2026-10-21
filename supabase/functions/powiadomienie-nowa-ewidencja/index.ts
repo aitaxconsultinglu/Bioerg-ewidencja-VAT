@@ -24,6 +24,10 @@ import { createClient } from 'jsr:@supabase/supabase-js@2'
 import { opisBledu, zapiszWDzienniku } from './dziennik.ts'
 import { wyslijMaila } from './poczta.ts'
 import { stopkaMaila, wczytajUstawienia } from './ustawienia.ts'
+import {
+  czyZapytanieWstepne, odpowiedzJSON as odpowiedz, odpowiedzWstepna, tylkoSerwis,
+  ustalWolajacego,
+} from './brama.ts'
 
 // Parametry SMTP z sekretow, zeby zmiana skrzynki nadawczej nie wymagala zmiany kodu.
 // trim() na nazwie serwera, porcie i loginie: wartosci sekretow wkleja sie recznie,
@@ -79,13 +83,21 @@ function trescPowiadomienia(
   ].join('\n')
 }
 
-function odpowiedz(tresc: unknown, status = 200) {
-  return new Response(JSON.stringify(tresc), {
-    status, headers: { 'Content-Type': 'application/json' },
-  })
-}
-
 Deno.serve(async (req) => {
+  if (czyZapytanieWstepne(req)) return odpowiedzWstepna()
+
+  const supabase = createClient(
+    Deno.env.get('SUPABASE_URL')!,
+    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
+  )
+
+  // Funkcje wola wylacznie potok GPS po imporcie danych. Do 2026-10-21 wystarczyl klucz
+  // publishable z paczki aplikacji, zeby - przez `podglad_na` - wyslac spis calej floty
+  // razem z nazwiskami kierownikow na dowolny adres.
+  const wolajacy = await ustalWolajacego(req, supabase)
+  const odmowa = tylkoSerwis(wolajacy)
+  if (odmowa) return odmowa
+
   let rok: number | undefined
   let miesiac: number | undefined
   // { podglad_na: "adres" } to tryb PODGLADU: wszystko liczy sie na prawdziwych danych,
@@ -121,11 +133,6 @@ Deno.serve(async (req) => {
     console.error(brak)
     return odpowiedz({ wyslano: 0, powod: brak }, 500)
   }
-
-  const supabase = createClient(
-    Deno.env.get('SUPABASE_URL')!,
-    Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
-  )
 
   const ust = await wczytajUstawienia(supabase)
   const stopka = stopkaMaila(ust)
