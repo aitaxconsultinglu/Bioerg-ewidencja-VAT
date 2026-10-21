@@ -9,6 +9,7 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2'
 import { opisBledu, zapiszWDzienniku } from './dziennik.ts'
 import { wyslijMaila } from './poczta.ts'
+import { stopkaMaila, wczytajUstawienia } from './ustawienia.ts'
 
 const SMTP_HOST = (Deno.env.get('SMTP_HOST') ?? 'smtp.gmail.com').trim()
 const SMTP_PORT = Number((Deno.env.get('SMTP_PORT') ?? '465').trim())
@@ -19,8 +20,6 @@ const MIESIACE_PL = [
   'Styczeń', 'Luty', 'Marzec', 'Kwiecień', 'Maj', 'Czerwiec',
   'Lipiec', 'Sierpień', 'Wrzesień', 'Październik', 'Listopad', 'Grudzień',
 ]
-
-const ADRES_APLIKACJI = 'https://aitaxconsultinglu.github.io/Bioerg-ewidencja-VAT/'
 
 function odpowiedz(tresc: unknown, status = 200) {
   return new Response(JSON.stringify(tresc), {
@@ -44,6 +43,8 @@ Deno.serve(async (req) => {
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   )
+
+  const ust = await wczytajUstawienia(supabase)
 
   const { data: e } = await supabase
     .from('monthly_logs')
@@ -79,6 +80,9 @@ Deno.serve(async (req) => {
 
   for (const k of ksiegowi) {
     if (!k.email) continue
+    // W podgladzie wystarczy jedna probka: tresc jest identyczna dla calej ksiegowosci,
+    // a trzy takie same maile na jeden adres testowy tylko zasmiecaja skrzynke.
+    if (podglad && wyslano > 0) continue
     const odbiorca = podglad ? podgladNa : k.email
     const tematWysylki = podglad ? `[PODGLĄD dla ${k.email}] ${temat}` : temat
     const wpis = {
@@ -109,10 +113,7 @@ Deno.serve(async (req) => {
           'Prosimy o przejrzenie i zatwierdzenie albo odesłanie do poprawki',
           'z komentarzem dla kierownika.',
           '',
-          `Aplikacja: ${ADRES_APLIKACJI}`,
-          '',
-          'Pozdrawiamy,',
-          'automat Bioerg',
+          ...stopkaMaila(ust),
         ].join('\n'),
       })
       await zapiszWDzienniku(supabase, { ...wpis, status: 'wyslany' })

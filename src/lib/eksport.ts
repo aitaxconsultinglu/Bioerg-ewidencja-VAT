@@ -50,7 +50,7 @@ export function nazwaPliku(e: Ewidencja, rozszerzenie: string) {
 }
 
 export function nazwaPaczki(rok: number, miesiac: number) {
-  return `Bioerg_ewidencja przebiegu_Vat_${miesiacRok(rok, miesiac).replace(' ', '.')}`
+  return `Ewidencja przebiegu_Vat_${miesiacRok(rok, miesiac).replace(' ', '.')}`
 }
 
 function pobierzBlob(blob: Blob, nazwa: string) {

@@ -4,7 +4,7 @@ export default {
   theme: {
     extend: {
       colors: {
-        // Kolory marki Bioerg. Używane na akcenty, przyciski i oznaczenia statusów -
+        // Kolory marki klienta. Używane na akcenty, przyciski i oznaczenia statusów -
         // nie na duże wypełnienia tła, bo to narzędzie robocze, czytane codziennie.
         limonka: {
           DEFAULT: '#C4E82A',

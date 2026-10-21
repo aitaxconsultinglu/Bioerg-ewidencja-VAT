@@ -152,7 +152,7 @@ export function HistoriaMaili({ profil, naListe }: Props) {
             id="szukaj-maila"
             value={szukaj}
             onChange={(e) => setSzukaj(e.target.value)}
-            placeholder="np. Marciniak albo KOS1431F"
+            placeholder="nazwisko, adres e-mail albo numer rejestracyjny"
             className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blekit focus:outline-none"
           />
         </div>

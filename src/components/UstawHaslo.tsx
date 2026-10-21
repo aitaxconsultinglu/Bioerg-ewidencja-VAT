@@ -42,8 +42,8 @@ export function UstawHaslo({ powod, email, gotowe }: Props) {
     <div className="flex min-h-screen items-center justify-center bg-slate-50 px-4">
       <form onSubmit={zapisz} className="w-full max-w-sm rounded-lg border border-slate-200 bg-white p-8 shadow-sm">
         <img
-          src={`${import.meta.env.BASE_URL}bioerg-logo.png`}
-          alt="Bioerg"
+          src={`${import.meta.env.BASE_URL}logo.png`}
+          alt="Logo"
           className="mx-auto h-10 w-auto"
         />
         <h1 className="mt-5 text-center text-lg font-semibold">

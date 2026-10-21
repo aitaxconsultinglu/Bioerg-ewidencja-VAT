@@ -133,7 +133,7 @@ export function Uzytkownicy({ profil, naListe }: Props) {
               id="nowy-email"
               type="email"
               required
-              placeholder="j.kowalski@bioerg.pl"
+              placeholder="imie.nazwisko@firma.pl"
               value={nowy.email}
               onChange={(e) => setNowy({ ...nowy, email: e.target.value })}
               className="mt-1 w-60 rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blekit focus:outline-none"

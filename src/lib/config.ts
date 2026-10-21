@@ -10,7 +10,14 @@ export const SUPABASE_URL =
 export const SUPABASE_ANON_KEY =
   import.meta.env.VITE_SUPABASE_ANON_KEY || 'sb_publishable_TC7FvZ7TI5AweSSSjbfU4g_bXSYB8dw'
 
-export const NAZWA_PODATNIKA = 'Bioerg Sp. z o.o.'
+// Nazwa podatnika trafia na wydruk ewidencji (wymóg formalny), ale NIE do kodu
+// źródłowego: repozytorium jest publiczne, a nazwa firmy razem z nazwiskami kierowników
+// i numerami rejestracyjnymi złożyłaby się na gotowy zestaw danych o konkretnym
+// przedsiębiorstwie. Wartość podstawia się przy budowaniu z ustawienia repozytorium
+// (zmienna NAZWA_PODATNIKA w GitHub Actions). Przy pustej zmiennej na wydruku zostaje
+// neutralny tekst zastępczy - lepiej niż zdradzić firmę każdemu, kto zajrzy do kodu.
+export const NAZWA_PODATNIKA =
+  import.meta.env.VITE_NAZWA_PODATNIKA || '(nazwa podatnika - ustaw w konfiguracji)'
 
 // WARSTWA 3 kontroli danych GPS. O tyle kilometrów ewidencja może różnić się od faktycznego
 // odczytu licznika, zanim przestaniemy pozwalać wysłać ją do akceptacji. Kilka kilometrów
@@ -20,7 +27,10 @@ export const NAZWA_PODATNIKA = 'Bioerg Sp. z o.o.'
 // (sumowany szum GPS na postoju + transport urządzenia z miejsca montażu).
 export const TOLERANCJA_LICZNIKA_KM = 5
 
-export const MIN_DLUGOSC_HASLA = 6
+// 2026-10-21 podniesione z 6 na 10. Sześć znaków to dla hasła stałego dostępu do danych
+// osobowych za mało, a wymaganie dotyczy wyłącznie haseł ustawianych OD TERAZ - nikomu
+// nie unieważnia dotychczasowego i nikogo nie wylogowuje.
+export const MIN_DLUGOSC_HASLA = 10
 const ZNAKI_SPECJALNE = /[^A-Za-z0-9]/
 
 /** Zwraca komunikat o błędzie albo null, gdy hasło spełnia wymagania. */

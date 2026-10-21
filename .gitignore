@@ -5,3 +5,15 @@ dist
 .env.local
 *.local
 .DS_Store
+
+# Arkusze i dokumenty NIGDY nie wchodza do tego repozytorium. Jest publiczne, a 2026-10-21
+# okazalo sie, ze trzy pliki xlsx z nazwiskami kierownikow, ich sluzbowymi adresami,
+# numerami rejestracyjnymi i HASLAMI TYMCZASOWYMI lezaly w nim jawnie przez tygodnie.
+# Robocze pliki trzymamy obok repozytorium, w katalogu z danymi poufnymi.
+*.xlsx
+*.xlsm
+*.xls
+*.csv
+*.docx
+*.pdf
+

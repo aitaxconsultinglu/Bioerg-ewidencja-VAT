@@ -2,7 +2,7 @@
 //
 // Dwa rytmy (od 2026-10-20):
 //  - ewidencja NIEWYSLANA (wygenerowana / w edycji) - co dwa dni, jak dotad;
-//  - ewidencja ODESLANA DO POPRAWKI - CODZIENNIE, bo ksiegowosc czeka na konkretna
+//  - ewidencja ODESLANA DO POPRAWKI - co dwa dni, bo ksiegowosc czeka na konkretna
 //    poprawke i zwleka z zamknieciem miesiaca, a nie na pierwsze wypelnienie.
 // Odstep liczy sie od OSTATNIEGO przypomnienia dla danej ewidencji, a nie od sztywnego
 // dnia tygodnia.
@@ -14,19 +14,19 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2'
 import { opisBledu, zapiszWDzienniku } from './dziennik.ts'
 import { wyslijMaila } from './poczta.ts'
+import { stopkaMaila, wczytajUstawienia } from './ustawienia.ts'
 
 // Parametry SMTP z sekretow, zeby zmiana skrzynki nadawczej nie wymagala zmiany kodu.
 // Domyslnie Gmail - tak dziala potok raportowy (smtp.gmail.com:587). Dla firmowej
 // skrzynki w home.pl wystarczy ustawic SMTP_HOST i SMTP_PORT w sekretach funkcji
 // brzegowych; dokladna nazwa serwera jest w panelu home.pl albo w mailu powitalnym
-// (przy wlasnym certyfikacie SSL dla domeny bywa to po prostu bioerg.pl).
+// (przy wlasnym certyfikacie SSL dla domeny bywa to po prostu nazwa domeny).
 // Loginem w home.pl jest PELNY adres e-mail, nie sama nazwa konta.
 // trim() na nazwie serwera, porcie i loginie: wartosci sekretow wkleja sie recznie,
 // a spacja na koncu jest w panelu niewidoczna. Potwierdzone na realnej konfiguracji
-// 2026-10-21: SMTP_HOST mial koncowa spacje i denomailer odrzucal nazwe komunikatem
-// "invalid host 'serwer2269615.home.pl ': invalid char found in FQDN". Hasla NIE
-// obcinamy - gdyby naprawde konczylo sie spacja, obcinanie zepsuloby logowanie bez
-// zadnego sladu; zamiast tego funkcja test-poczty raportuje jego dlugosc.
+// 2026-10-21: SMTP_HOST mial koncowa spacje i wysylka padala na "invalid char found in
+// FQDN". Hasla NIE obcinamy - gdyby naprawde konczylo sie spacja, obcinanie zepsuloby
+// logowanie bez zadnego sladu; zamiast tego funkcja test-poczty raportuje jego dlugosc.
 const SMTP_HOST = (Deno.env.get('SMTP_HOST') ?? 'smtp.gmail.com').trim()
 const SMTP_PORT = Number((Deno.env.get('SMTP_PORT') ?? '465').trim())
 const SMTP_LOGIN = (Deno.env.get('EMAIL_USER') ?? '').trim()
@@ -49,7 +49,6 @@ const MIESIACE_PL = [
   'Lipiec', 'Sierpień', 'Wrzesień', 'Październik', 'Listopad', 'Grudzień',
 ]
 
-const ADRES_APLIKACJI = 'https://aitaxconsultinglu.github.io/Bioerg-ewidencja-VAT/'
 const ODSTEP_DNI = 2
 
 /** Odstep dla ewidencji ODESLANYCH DO POPRAWKI. Na zyczenie klienta z 2026-10-21 to
@@ -71,10 +70,6 @@ function godzinaWPolsce(d: Date) {
     timeZone: 'Europe/Warsaw', hour: '2-digit', hour12: false,
   }).format(d))
 }
-
-/** Kopia kazdego przypomnienia, zeby bylo widac kto i o co jest ponaglany bez
- *  zagladania do logow funkcji. */
-const KOPIA_PRZYPOMNIEN = 'aitaxconsultinglu@gmail.com'
 
 /** Niedziela Wielkanocna metoda Meeusa/Jonesa/Butchera - od niej liczy sie Poniedzialek
  *  Wielkanocny i Boze Cialo, jedyne ruchome swieta wolne wypadajace w dzien roboczy. */
@@ -180,6 +175,9 @@ Deno.serve(async (req) => {
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   )
+
+  const ust = await wczytajUstawienia(supabase)
+  const KOPIA_PRZYPOMNIEN = ust.kopiaPowiadomien
 
   const progNiewyslane = new Date(Date.now() - ODSTEP_DNI * 86_400_000)
   const progPoprawki = new Date(Date.now() - ODSTEP_GODZIN_POPRAWKA * 3_600_000)
@@ -290,7 +288,7 @@ Deno.serve(async (req) => {
         '',
       )
     }
-    tresc.push(`Aplikacja: ${ADRES_APLIKACJI}`, '', 'Pozdrawiamy,', 'automat Bioerg')
+    tresc.push(...stopkaMaila(ust))
 
     // W podgladzie nie dublujemy kopii - i tak wszystko idzie na ten jeden adres.
     const odbiorca = podglad ? podgladNa : profil.email

@@ -37,10 +37,20 @@ jobs:
         # Adres projektu i klucz publishable są wpisane w src/lib/config.ts (klucz jest
         # z założenia jawny - dostępu pilnuje RLS). Zmienne poniżej pozwalają nadpisać
         # je bez zmiany kodu, np. gdyby projekt Supabase został przeniesiony.
+        #
+        # NAZWA_PODATNIKA jest zmienną repozytorium, a nie stałą w kodzie: repozytorium
+        # jest publiczne i nazwa firmy nie ma w nim czego szukać. Bez tej zmiennej
+        # aplikacja zbuduje się poprawnie, tylko na wydruku ewidencji pojawi się tekst
+        # zastępczy - celowo, żeby brak konfiguracji był widoczny, a nie cichy.
+        #
+        # VITE_BASE liczy się z GITHUB_REPOSITORY ("wlasciciel/nazwa"), która jest ustawiona
+        # przy każdym rodzaju uruchomienia. Dzięki temu po zmianie nazwy repozytorium nie
+        # trzeba poprawiać vite.config.ts, a nazwa nie jest wpisana w kodzie.
         env:
           VITE_SUPABASE_URL: ${{ vars.SUPABASE_URL }}
           VITE_SUPABASE_ANON_KEY: ${{ vars.SUPABASE_ANON_KEY }}
-        run: npm run build
+          VITE_NAZWA_PODATNIKA: ${{ vars.NAZWA_PODATNIKA }}
+        run: VITE_BASE="/${GITHUB_REPOSITORY#*/}/" npm run build
 
       - name: Konfiguracja GitHub Pages
         uses: actions/configure-pages@v5

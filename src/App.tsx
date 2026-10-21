@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useState } from 'react'
 import type { Session } from '@supabase/supabase-js'
 import { supabase } from '@/lib/supabase'
+import { NAZWA_PODATNIKA } from '@/lib/config'
 import type { Profil } from '@/lib/types'
 import { Logowanie } from './components/Logowanie'
 import { UstawHaslo } from './components/UstawHaslo'
@@ -103,12 +104,12 @@ export default function App() {
             <div className="h-8 w-1.5 rounded bg-limonka" />
             <div>
               <h1 className="text-sm font-semibold leading-tight">Ewidencja przebiegu pojazdu</h1>
-              <p className="text-xs text-slate-500">Bioerg Sp. z o.o.</p>
+              <p className="text-xs text-slate-500">{NAZWA_PODATNIKA}</p>
             </div>
           </div>
           <img
-            src={`${import.meta.env.BASE_URL}bioerg-logo.png`}
-            alt="Bioerg"
+            src={`${import.meta.env.BASE_URL}logo.png`}
+            alt="Logo"
             className="h-8 w-auto justify-self-center"
           />
           <div className="flex items-center justify-end gap-4">

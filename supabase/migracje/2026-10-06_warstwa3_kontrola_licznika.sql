@@ -1,9 +1,10 @@
 -- WARSTWA 3 kontroli danych GPS - uzgodnienie ewidencji z licznikiem pojazdu.
 --
--- Powod: wrzesien 2026. Trzy nowo zamontowane urzadzenia GPS (Toyota ProAce SC349GF,
--- SC451GF, SC452GF) naliczyly lacznie 1393 km, ktorych pojazdy nie przejechaly - transport
--- urzadzenia z miejsca montazu zapisany jako jazda oraz sumowany szum GPS na postoju na
--- terenie zakladu. Jedna z tych ewidencji byla juz podpisana przez kierownika i czekala na
+-- Powod: wrzesien 2026. Trzy nowo zamontowane urzadzenia GPS naliczyly lacznie 1393 km,
+-- ktorych pojazdy nie przejechaly - transport urzadzenia z miejsca montazu zapisany jako
+-- jazda oraz sumowany szum GPS na postoju na terenie zakladu. Numery rejestracyjne celowo
+-- pominiete: to repozytorium jest publiczne.
+-- Jedna z tych ewidencji byla juz podpisana przez kierownika i czekala na
 -- akceptacje ksiegowosci. Nic w aplikacji nie porownywalo ewidencji z licznikiem pojazdu,
 -- wiec usterka nie miala gdzie sie zatrzymac.
 --

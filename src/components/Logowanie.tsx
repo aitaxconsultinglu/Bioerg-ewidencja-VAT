@@ -53,8 +53,8 @@ export function Logowanie() {
         className="w-full max-w-sm rounded-lg border border-slate-200 bg-white p-8 shadow-sm"
       >
         <img
-          src={`${import.meta.env.BASE_URL}bioerg-logo.png`}
-          alt="Bioerg"
+          src={`${import.meta.env.BASE_URL}logo.png`}
+          alt="Logo"
           className="mx-auto h-10 w-auto"
         />
         <h1 className="mt-5 text-center text-lg font-semibold">Ewidencja przebiegu pojazdu</h1>
@@ -71,7 +71,7 @@ export function Logowanie() {
           required
           autoFocus
           autoComplete="username"
-          placeholder="j.kowalski@bioerg.pl"
+          placeholder="imie.nazwisko@firma.pl"
           value={adres}
           onChange={(e) => setAdres(e.target.value)}
           className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blekit focus:outline-none"

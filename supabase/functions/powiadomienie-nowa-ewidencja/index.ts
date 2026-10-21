@@ -23,6 +23,7 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2'
 import { opisBledu, zapiszWDzienniku } from './dziennik.ts'
 import { wyslijMaila } from './poczta.ts'
+import { stopkaMaila, wczytajUstawienia } from './ustawienia.ts'
 
 // Parametry SMTP z sekretow, zeby zmiana skrzynki nadawczej nie wymagala zmiany kodu.
 // trim() na nazwie serwera, porcie i loginie: wartosci sekretow wkleja sie recznie,
@@ -34,11 +35,6 @@ const SMTP_HOST = (Deno.env.get('SMTP_HOST') ?? 'smtp.gmail.com').trim()
 const SMTP_PORT = Number((Deno.env.get('SMTP_PORT') ?? '465').trim())
 const SMTP_LOGIN = (Deno.env.get('EMAIL_USER') ?? '').trim()
 const SMTP_HASLO = Deno.env.get('EMAIL_PASS') ?? ''
-
-/** Kopia kazdego powiadomienia dla kierownika, zeby bylo widac, co wyszlo z automatu,
- *  bez zagladania do dziennika. Tak samo jak w przypomnieniach. Zbiorczych kopii dla
- *  ksiegowosci nie dublujemy - to ta sama tresc, tylko o calym taborze. */
-const KOPIA = 'aitaxconsultinglu@gmail.com'
 
 /** Czy skrzynka nadawcza jest w ogole skonfigurowana. Do 2026-10-20 sekretow EMAIL_USER
  *  i EMAIL_PASS nie bylo wcale, wiec z aplikacji nie wyszedl ani jeden mail. Sprawdzamy
@@ -57,12 +53,12 @@ const MIESIACE_PL = [
   'Lipiec', 'Sierpień', 'Wrzesień', 'Październik', 'Listopad', 'Grudzień',
 ]
 
-const ADRES_APLIKACJI = 'https://aitaxconsultinglu.github.io/Bioerg-ewidencja-VAT/'
-
 /** Jedna tresc dla kierownikow i dla ksiegowosci - ta sama wiadomosc o tym, ze
  *  ewidencja zostala wygenerowana i czeka na uzupelnienie. Rozni je wylacznie zakres
  *  pojazdow: kierownik dostaje swoje, ksiegowosc caly tabor z danego miesiaca. */
-function trescPowiadomienia(imieNazwisko: string, okres: string, pojazdy: string[]) {
+function trescPowiadomienia(
+  imieNazwisko: string, okres: string, pojazdy: string[], stopka: string[],
+) {
   return [
     `Dzień dobry${imieNazwisko ? ', ' + imieNazwisko : ''},`,
     '',
@@ -79,10 +75,7 @@ function trescPowiadomienia(imieNazwisko: string, okres: string, pojazdy: string
     'Pozostałe dane (data, trasa, liczba kilometrów) pochodzą z GPS i są już wypełnione.',
     'Po uzupełnieniu prosimy podpisać ewidencję i wysłać ją do akceptacji.',
     '',
-    `Aplikacja: ${ADRES_APLIKACJI}`,
-    '',
-    'Pozdrawiamy,',
-    'automat Bioerg',
+    ...stopka,
   ].join('\n')
 }
 
@@ -133,6 +126,10 @@ Deno.serve(async (req) => {
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   )
+
+  const ust = await wczytajUstawienia(supabase)
+  const stopka = stopkaMaila(ust)
+  const KOPIA = ust.kopiaPowiadomien
 
   const { data: ewidencje, error } = await supabase
     .from('monthly_logs')
@@ -200,7 +197,7 @@ Deno.serve(async (req) => {
         host: SMTP_HOST, port: SMTP_PORT, login: SMTP_LOGIN, haslo: SMTP_HASLO,
         od: SMTP_LOGIN, do_: odbiorca, kopia,
         temat: tematWysylki,
-        tresc: trescPowiadomienia(profil.imie_nazwisko ?? '', okres, lista),
+        tresc: trescPowiadomienia(profil.imie_nazwisko ?? '', okres, lista, stopka),
       })
       // Znacznik stawiamy DOPIERO po udanej wysylce i NIGDY w podgladzie.
       if (!podglad) {
@@ -253,7 +250,7 @@ Deno.serve(async (req) => {
         host: SMTP_HOST, port: SMTP_PORT, login: SMTP_LOGIN, haslo: SMTP_HASLO,
         od: SMTP_LOGIN, do_: odbiorca,
         temat: tematWysylki,
-        tresc: trescPowiadomienia(k.imie_nazwisko ?? '', okres, wszystkiePojazdy),
+        tresc: trescPowiadomienia(k.imie_nazwisko ?? '', okres, wszystkiePojazdy, stopka),
       })
       await zapiszWDzienniku(supabase, { ...wpisDziennika, status: 'wyslany' })
       doKsiegowosci++

@@ -9,19 +9,19 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2'
 import { opisBledu, zapiszWDzienniku } from './dziennik.ts'
 import { wyslijMaila } from './poczta.ts'
+import { stopkaMaila, wczytajUstawienia } from './ustawienia.ts'
 
 // Parametry SMTP z sekretow, zeby zmiana skrzynki nadawczej nie wymagala zmiany kodu.
 // Domyslnie Gmail - tak dziala potok raportowy (smtp.gmail.com:587). Dla firmowej
 // skrzynki w home.pl wystarczy ustawic SMTP_HOST i SMTP_PORT w sekretach funkcji
 // brzegowych; dokladna nazwa serwera jest w panelu home.pl albo w mailu powitalnym
-// (przy wlasnym certyfikacie SSL dla domeny bywa to po prostu bioerg.pl).
+// (przy wlasnym certyfikacie SSL dla domeny bywa to po prostu nazwa domeny).
 // Loginem w home.pl jest PELNY adres e-mail, nie sama nazwa konta.
 // trim() na nazwie serwera, porcie i loginie: wartosci sekretow wkleja sie recznie,
 // a spacja na koncu jest w panelu niewidoczna. Potwierdzone na realnej konfiguracji
-// 2026-10-21: SMTP_HOST mial koncowa spacje i denomailer odrzucal nazwe komunikatem
-// "invalid host 'serwer2269615.home.pl ': invalid char found in FQDN". Hasla NIE
-// obcinamy - gdyby naprawde konczylo sie spacja, obcinanie zepsuloby logowanie bez
-// zadnego sladu; zamiast tego funkcja test-poczty raportuje jego dlugosc.
+// 2026-10-21: SMTP_HOST mial koncowa spacje i wysylka padala na "invalid char found in
+// FQDN". Hasla NIE obcinamy - gdyby naprawde konczylo sie spacja, obcinanie zepsuloby
+// logowanie bez zadnego sladu; zamiast tego funkcja test-poczty raportuje jego dlugosc.
 const SMTP_HOST = (Deno.env.get('SMTP_HOST') ?? 'smtp.gmail.com').trim()
 const SMTP_PORT = Number((Deno.env.get('SMTP_PORT') ?? '465').trim())
 const SMTP_LOGIN = (Deno.env.get('EMAIL_USER') ?? '').trim()
@@ -44,8 +44,6 @@ const MIESIACE_PL = [
   'Lipiec', 'Sierpień', 'Wrzesień', 'Październik', 'Listopad', 'Grudzień',
 ]
 
-const ADRES_APLIKACJI = 'https://aitaxconsultinglu.github.io/Bioerg-ewidencja-VAT/'
-
 function odpowiedz(tresc: unknown, status = 200) {
   return new Response(JSON.stringify(tresc), {
     status,
@@ -65,6 +63,8 @@ Deno.serve(async (req) => {
     Deno.env.get('SUPABASE_URL')!,
     Deno.env.get('SUPABASE_SERVICE_ROLE_KEY')!,
   )
+
+  const ust = await wczytajUstawienia(supabase)
 
   const { data: e } = await supabase
     .from('monthly_logs')
@@ -137,10 +137,7 @@ Deno.serve(async (req) => {
         '',
         'Prosimy o naniesienie poprawek i ponowne wysłanie ewidencji do akceptacji.',
         '',
-        `Aplikacja: ${ADRES_APLIKACJI}`,
-        '',
-        'Pozdrawiamy,',
-        'automat Bioerg',
+        ...stopkaMaila(ust),
       ].join('\n'),
     })
     await zapiszWDzienniku(supabase, { ...wpis, status: 'wyslany' })

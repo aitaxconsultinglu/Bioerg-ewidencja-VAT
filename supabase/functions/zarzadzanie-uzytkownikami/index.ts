@@ -18,13 +18,20 @@ function odpowiedz(tresc: unknown, status = 200) {
   })
 }
 
-/** Haslo tymczasowe spelniajace wymagania aplikacji: min. 6 znakow, min. 1 specjalny. */
+/** Haslo tymczasowe spelniajace wymagania aplikacji: min. 10 znakow, min. 1 specjalny.
+ *
+ *  Do 2026-10-21 haslo zaczynalo sie od nazwy firmy. Staly, publicznie
+ *  znany prefiks nie wnosi entropii, a zdradza, do czego haslo pasuje - gdy taka lista
+ *  gdzies wycieknie, od razu wiadomo, czyje to konta. Teraz losowe sa wszystkie znaki,
+ *  a myslnik w srodku spelnia wymog znaku specjalnego.
+ *
+ *  Litery l/I/O/0/1 pominiete celowo: haslo przepisuje sie recznie z maila. */
 function hasloTymczasowe() {
   const znaki = 'abcdefghijkmnpqrstuvwxyzABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-  const losowe = new Uint32Array(8)
+  const losowe = new Uint32Array(12)
   crypto.getRandomValues(losowe)
   const rdzen = [...losowe].map((n) => znaki[n % znaki.length]).join('')
-  return `Bioerg-${rdzen}`
+  return `${rdzen.slice(0, 6)}-${rdzen.slice(6)}`
 }
 
 Deno.serve(async (req) => {
