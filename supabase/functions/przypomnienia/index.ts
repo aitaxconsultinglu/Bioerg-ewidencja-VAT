@@ -12,8 +12,8 @@
 // Kazda wysylka - udana i nieudana - trafia do dziennika email_log (patrz dziennik.ts),
 // zeby ksiegowosc mogla sprawdzic, kto i kiedy co dostal.
 import { createClient } from 'jsr:@supabase/supabase-js@2'
-import { SMTPClient } from 'https://deno.land/x/denomailer@1.6.0/mod.ts'
 import { opisBledu, zapiszWDzienniku } from './dziennik.ts'
+import { wyslijMaila } from './poczta.ts'
 
 // Parametry SMTP z sekretow, zeby zmiana skrzynki nadawczej nie wymagala zmiany kodu.
 // Domyslnie Gmail - tak dziala potok raportowy (smtp.gmail.com:587). Dla firmowej
@@ -29,7 +29,6 @@ import { opisBledu, zapiszWDzienniku } from './dziennik.ts'
 // zadnego sladu; zamiast tego funkcja test-poczty raportuje jego dlugosc.
 const SMTP_HOST = (Deno.env.get('SMTP_HOST') ?? 'smtp.gmail.com').trim()
 const SMTP_PORT = Number((Deno.env.get('SMTP_PORT') ?? '465').trim())
-const SMTP_SZYFROWANIE_OD_RAZU = SMTP_PORT === 465
 const SMTP_LOGIN = (Deno.env.get('EMAIL_USER') ?? '').trim()
 const SMTP_HASLO = Deno.env.get('EMAIL_PASS') ?? ''
 
@@ -243,16 +242,6 @@ Deno.serve(async (req) => {
     })
   }
 
-  const klient = new SMTPClient({
-    connection: {
-      hostname: SMTP_HOST,
-      port: SMTP_PORT,
-      // Port 465 szyfruje od pierwszego bajtu (implicit TLS), 587 negocjuje STARTTLS.
-      tls: SMTP_SZYFROWANIE_OD_RAZU,
-      auth: { username: SMTP_LOGIN, password: SMTP_HASLO },
-    },
-  })
-
   const termin = terminRoboczy(2)
   let wyslano = 0
 
@@ -317,13 +306,17 @@ Deno.serve(async (req) => {
       miesiac: najnowszy.miesiac,
     }
     try {
-      await klient.send({
-        from: SMTP_LOGIN,
-        to: odbiorca,
+      await wyslijMaila({
+        host: SMTP_HOST,
+        port: SMTP_PORT,
+        login: SMTP_LOGIN,
+        haslo: SMTP_HASLO,
+        od: SMTP_LOGIN,
+        do_: odbiorca,
         // Nie dubluj, gdyby ponaglany byl sam adres kopii.
-        cc: kopia ?? undefined,
-        subject: tematWysylki,
-        content: tresc.join('\n'),
+        kopia,
+        temat: tematWysylki,
+        tresc: tresc.join('\n'),
       })
       // Podglad nie zuzywa dzisiejszego przypomnienia - prawdziwa wysylka musi sie odbyc.
       if (!podglad) {
@@ -340,7 +333,6 @@ Deno.serve(async (req) => {
     }
   }
 
-  try { await klient.close() } catch { /* polaczenie moglo nie powstac */ }
   return new Response(JSON.stringify({
     wyslano, termin, podglad: podglad ? podgladNa : undefined,
     okres: `${najnowszy.rok}-${String(najnowszy.miesiac).padStart(2, '0')}`,
