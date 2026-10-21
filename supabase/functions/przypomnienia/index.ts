@@ -126,13 +126,24 @@ function terminRoboczy(dniRoboczych: number) {
 Deno.serve(async (req) => {
   // { wymuszone: true } pomija warunek godziny - do recznego uruchomienia z panelu albo
   // z tej sesji. Zakaz niedziel i swiat obowiazuje nadal, takze przy wymuszeniu.
+  //
+  // { podglad_na: "adres" } to tryb PODGLADU: wszystko liczy sie na prawdziwych danych
+  // i grupuje po kierownikach dokladnie tak jak zwykle, ale kazda wiadomosc idzie na
+  // podany adres zamiast do kierownika. Znacznik last_reminder_sent_at NIE jest wtedy
+  // ruszany - inaczej podglad "zuzylby" dzisiejsze przypomnienie i prawdziwa wysylka
+  // by sie nie odbyla. W dzienniku takie wpisy maja rodzaj 'przypomnienie_podglad',
+  // zeby nie mieszaly sie z faktycznymi wysylkami do kierownikow.
   let wymuszone = false
+  let podgladNa = ''
   try {
     const cialo = await req.json()
     wymuszone = cialo?.wymuszone === true
+    podgladNa = String(cialo?.podglad_na ?? '').trim()
   } catch {
     wymuszone = false
   }
+  const podglad = podgladNa !== ''
+  if (podglad) wymuszone = true
 
   // Poniedzialek-sobota, z pominieciem swiat. Zadanie cron chodzi tez w te dni, ale
   // sprawdzamy to rowniez tutaj: dzien wolny zalezy od daty (Wielkanoc, Boze Cialo),
@@ -289,14 +300,18 @@ Deno.serve(async (req) => {
     }
     tresc.push(`Aplikacja: ${ADRES_APLIKACJI}`, '', 'Pozdrawiamy,', 'automat Bioerg')
 
-    const kopia = profil.email === KOPIA_PRZYPOMNIEN ? null : KOPIA_PRZYPOMNIEN
+    // W podgladzie nie dublujemy kopii - i tak wszystko idzie na ten jeden adres.
+    const odbiorca = podglad ? podgladNa : profil.email
+    const kopia = podglad || profil.email === KOPIA_PRZYPOMNIEN ? null : KOPIA_PRZYPOMNIEN
+    // Prefiks z adresem kierownika, zeby w podgladzie bylo widac, czyj to mial byc mail.
+    const tematWysylki = podglad ? `[PODGLĄD dla ${profil.email}] ${temat}` : temat
     const wpisDziennika = {
-      rodzaj: 'przypomnienie',
-      adresat: profil.email,
+      rodzaj: podglad ? 'przypomnienie_podglad' : 'przypomnienie',
+      adresat: odbiorca,
       adresat_nazwa: profil.imie_nazwisko,
       profil_id: kierownikId,
       kopia,
-      temat,
+      temat: tematWysylki,
       pojazdy,
       rok: najnowszy.rok,
       miesiac: najnowszy.miesiac,
@@ -304,14 +319,17 @@ Deno.serve(async (req) => {
     try {
       await klient.send({
         from: SMTP_LOGIN,
-        to: profil.email,
+        to: odbiorca,
         // Nie dubluj, gdyby ponaglany byl sam adres kopii.
         cc: kopia ?? undefined,
-        subject: temat,
+        subject: tematWysylki,
         content: tresc.join('\n'),
       })
-      await supabase.from('monthly_logs')
-        .update({ last_reminder_sent_at: new Date().toISOString() }).in('id', wpis.logi)
+      // Podglad nie zuzywa dzisiejszego przypomnienia - prawdziwa wysylka musi sie odbyc.
+      if (!podglad) {
+        await supabase.from('monthly_logs')
+          .update({ last_reminder_sent_at: new Date().toISOString() }).in('id', wpis.logi)
+      }
       await zapiszWDzienniku(supabase, { ...wpisDziennika, status: 'wyslany' })
       wyslano++
     } catch (err) {
@@ -324,7 +342,8 @@ Deno.serve(async (req) => {
 
   try { await klient.close() } catch { /* polaczenie moglo nie powstac */ }
   return new Response(JSON.stringify({
-    wyslano, termin, okres: `${najnowszy.rok}-${String(najnowszy.miesiac).padStart(2, '0')}`,
+    wyslano, termin, podglad: podglad ? podgladNa : undefined,
+    okres: `${najnowszy.rok}-${String(najnowszy.miesiac).padStart(2, '0')}`,
   }), {
     headers: { 'Content-Type': 'application/json' },
   })

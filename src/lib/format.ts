@@ -87,3 +87,14 @@ export const KOLORY_STATUSU: Record<Status, string> = {
   odeslana_do_poprawki: 'bg-amber-50 text-amber-800 ring-amber-400',
   zaakceptowana: 'bg-limonka-jasna text-limonka-ciemna ring-limonka',
 }
+
+/** Rodzaje wiadomości w dzienniku wysyłek, po polsku. Klucze muszą zgadzać się z tym,
+ *  co wpisują funkcje brzegowe - nieznany rodzaj pokazujemy bez tłumaczenia, zamiast
+ *  go ukrywać. */
+export const ETYKIETY_RODZAJU_MAILA: Record<string, string> = {
+  przypomnienie: 'Przypomnienie',
+  przypomnienie_podglad: 'Przypomnienie (podgląd testowy)',
+  poprawka: 'Odesłanie do poprawki',
+  nowa_ewidencja: 'Nowa ewidencja - kierownik',
+  nowa_ewidencja_ksiegowosc: 'Nowa ewidencja - księgowość',
+}

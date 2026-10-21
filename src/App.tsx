@@ -7,6 +7,7 @@ import { UstawHaslo } from './components/UstawHaslo'
 import { ListaEwidencji } from './components/ListaEwidencji'
 import { Ewidencja } from './components/Ewidencja'
 import { Uzytkownicy } from './components/Uzytkownicy'
+import { HistoriaMaili } from './components/HistoriaMaili'
 import { Button } from './components/ui/button'
 
 export default function App() {
@@ -17,6 +18,7 @@ export default function App() {
   const [odzyskiwanie, setOdzyskiwanie] = useState(false)
   const [zmianaHasla, setZmianaHasla] = useState(false)
   const [ekranUzytkownikow, setEkranUzytkownikow] = useState(false)
+  const [ekranHistoriiMaili, setEkranHistoriiMaili] = useState(false)
 
   const wczytajProfil = useCallback(async (userId: string) => {
     const { data } = await supabase
@@ -117,9 +119,18 @@ export default function App() {
               </p>
             </div>
             {profil.rola === 'ksiegowosc' && (
-              <Button onClick={() => { setEkranUzytkownikow(true); setOtwartaEwidencja(null) }}>
-                Użytkownicy
-              </Button>
+              <>
+                <Button onClick={() => {
+                  setEkranHistoriiMaili(true); setEkranUzytkownikow(false); setOtwartaEwidencja(null)
+                }}>
+                  Wysłane maile
+                </Button>
+                <Button onClick={() => {
+                  setEkranUzytkownikow(true); setEkranHistoriiMaili(false); setOtwartaEwidencja(null)
+                }}>
+                  Użytkownicy
+                </Button>
+              </>
             )}
             <Button onClick={() => setZmianaHasla(true)}>Zmień hasło</Button>
             <Button onClick={() => supabase.auth.signOut()}>Wyloguj</Button>
@@ -128,7 +139,9 @@ export default function App() {
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-6">
-        {ekranUzytkownikow && profil.rola === 'ksiegowosc' ? (
+        {ekranHistoriiMaili && profil.rola === 'ksiegowosc' ? (
+          <HistoriaMaili profil={profil} naListe={() => setEkranHistoriiMaili(false)} />
+        ) : ekranUzytkownikow && profil.rola === 'ksiegowosc' ? (
           <Uzytkownicy profil={profil} naListe={() => setEkranUzytkownikow(false)} />
         ) : otwartaEwidencja ? (
           <Ewidencja

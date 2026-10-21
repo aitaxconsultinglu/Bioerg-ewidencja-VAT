@@ -72,3 +72,22 @@ export interface WpisAudytu {
 
 /** Kolumny, które kierownik może edytować. Data, km i Lp. pochodzą z potoku GPS. */
 export type PoleEdytowalne = 'cel_wyjazdu' | 'skad' | 'dokad' | 'kierowca'
+
+/** Wpis dziennika wiadomości wychodzących (tabela email_log). Tworzą go wyłącznie
+ *  funkcje brzegowe; aplikacja tylko czyta, i tylko jako księgowość (RLS). */
+export interface WpisMaila {
+  id: string
+  rodzaj: string
+  adresat: string
+  adresat_nazwa: string | null
+  profil_id: string | null
+  kopia: string | null
+  temat: string
+  pojazdy: string[] | null
+  rok: number | null
+  miesiac: number | null
+  /** 'wyslany' | 'blad' */
+  status: string
+  blad: string | null
+  utworzono: string
+}
