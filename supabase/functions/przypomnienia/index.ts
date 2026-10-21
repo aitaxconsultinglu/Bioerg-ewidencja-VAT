@@ -21,10 +21,16 @@ import { opisBledu, zapiszWDzienniku } from './dziennik.ts'
 // brzegowych; dokladna nazwa serwera jest w panelu home.pl albo w mailu powitalnym
 // (przy wlasnym certyfikacie SSL dla domeny bywa to po prostu bioerg.pl).
 // Loginem w home.pl jest PELNY adres e-mail, nie sama nazwa konta.
-const SMTP_HOST = Deno.env.get('SMTP_HOST') ?? 'smtp.gmail.com'
-const SMTP_PORT = Number(Deno.env.get('SMTP_PORT') ?? '465')
+// trim() na nazwie serwera, porcie i loginie: wartosci sekretow wkleja sie recznie,
+// a spacja na koncu jest w panelu niewidoczna. Potwierdzone na realnej konfiguracji
+// 2026-10-21: SMTP_HOST mial koncowa spacje i denomailer odrzucal nazwe komunikatem
+// "invalid host 'serwer2269615.home.pl ': invalid char found in FQDN". Hasla NIE
+// obcinamy - gdyby naprawde konczylo sie spacja, obcinanie zepsuloby logowanie bez
+// zadnego sladu; zamiast tego funkcja test-poczty raportuje jego dlugosc.
+const SMTP_HOST = (Deno.env.get('SMTP_HOST') ?? 'smtp.gmail.com').trim()
+const SMTP_PORT = Number((Deno.env.get('SMTP_PORT') ?? '465').trim())
 const SMTP_SZYFROWANIE_OD_RAZU = SMTP_PORT === 465
-const SMTP_LOGIN = Deno.env.get('EMAIL_USER') ?? ''
+const SMTP_LOGIN = (Deno.env.get('EMAIL_USER') ?? '').trim()
 const SMTP_HASLO = Deno.env.get('EMAIL_PASS') ?? ''
 
 /** Czy skrzynka nadawcza jest w ogole skonfigurowana. Do 2026-10-20 sekretow EMAIL_USER
@@ -281,7 +287,7 @@ Deno.serve(async (req) => {
         '',
       )
     }
-    tresc.push(`Aplikacja: ${ADRES_APLIKACJI}`, '', 'Pozdrawiamy,', 'AI Tax Consulting Sp. z o.o.')
+    tresc.push(`Aplikacja: ${ADRES_APLIKACJI}`, '', 'Pozdrawiamy,', 'automat Bioerg')
 
     const kopia = profil.email === KOPIA_PRZYPOMNIEN ? null : KOPIA_PRZYPOMNIEN
     const wpisDziennika = {
@@ -297,7 +303,7 @@ Deno.serve(async (req) => {
     }
     try {
       await klient.send({
-        from: Deno.env.get('EMAIL_USER')!,
+        from: SMTP_LOGIN,
         to: profil.email,
         // Nie dubluj, gdyby ponaglany byl sam adres kopii.
         cc: kopia ?? undefined,
@@ -316,7 +322,7 @@ Deno.serve(async (req) => {
     }
   }
 
-  await klient.close()
+  try { await klient.close() } catch { /* polaczenie moglo nie powstac */ }
   return new Response(JSON.stringify({
     wyslano, termin, okres: `${najnowszy.rok}-${String(najnowszy.miesiac).padStart(2, '0')}`,
   }), {
