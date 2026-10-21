@@ -23,7 +23,7 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2'
 import { opisBledu, zapiszWDzienniku } from './dziennik.ts'
 import { wyslijMaila } from './poczta.ts'
-import { stopkaMaila, wczytajUstawienia } from './ustawienia.ts'
+import { odczekaj, odstepSekund, stopkaMaila, wczytajUstawienia } from './ustawienia.ts'
 import {
   czyZapytanieWstepne, odpowiedzJSON as odpowiedz, odpowiedzWstepna, tylkoSerwis,
   ustalWolajacego,
@@ -167,6 +167,14 @@ Deno.serve(async (req) => {
   let doKsiegowosci = 0
   const bledy: string[] = []
 
+  // Przerwa miedzy wiadomosciami - patrz odstepSekund w ustawienia.ts. To tu wysylka
+  // jest najwieksza (caly tabor 1. dnia miesiaca) i to ona 2026-10-21 trafila do spamu
+  // jako trzynascie niemal identycznych maili w trzynascie sekund.
+  const { count: ileKsiegowych } = await supabase
+    .from('profiles').select('id', { count: 'exact', head: true }).eq('rola', 'ksiegowosc')
+  const odstep = podglad ? 0 : odstepSekund(ust, wgKierownika.size + (ileKsiegowych ?? 0))
+  let pierwsza = true
+
   for (const [kierownikId, wpis] of wgKierownika) {
     const lista = [...new Set(wpis.pojazdy)].sort()
     const { data: profil } = await supabase
@@ -183,6 +191,9 @@ Deno.serve(async (req) => {
     }
     // W podgladzie wystarczy jedna probka wariantu "kierownik".
     if (podglad && !podgladWszyscy && doKierownikow > 0) continue
+
+    if (!pierwsza) await odczekaj(odstep)
+    pierwsza = false
 
     const odbiorca = podglad ? podgladNa : profil.email
     const kopia = podglad || profil.email === KOPIA ? null : KOPIA
@@ -238,6 +249,9 @@ Deno.serve(async (req) => {
     // W podgladzie wystarczy jedna probka wariantu "ksiegowosc".
     if (podglad && !podgladWszyscy && doKsiegowosci > 0) continue
 
+    if (!pierwsza) await odczekaj(odstep)
+    pierwsza = false
+
     const odbiorca = podglad ? podgladNa : k.email
     const tematWysylki = podglad ? `[PODGLĄD dla ${k.email}] ${temat}` : temat
     // Rodzaj 'nowa_ewidencja_ksiegowosc', zeby w dzienniku dalo sie odfiltrowac maile
@@ -271,7 +285,7 @@ Deno.serve(async (req) => {
   }
 
   return odpowiedz({
-    okres, doKierownikow, doKsiegowosci,
+    okres, doKierownikow, doKsiegowosci, odstep_s: odstep,
     podglad: podglad ? podgladNa : undefined,
     bledy: bledy.length ? bledy : undefined,
   })

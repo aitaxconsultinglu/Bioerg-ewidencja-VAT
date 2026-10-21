@@ -24,6 +24,8 @@ export interface Ustawienia {
   adresAplikacji: string
   /** Adres w kopii powiadomień albo null. */
   kopiaPowiadomien: string | null
+  /** Przerwa między kolejnymi wiadomościami jednej wysyłki, w sekundach. */
+  odstepMiedzyMailamiS: number
 }
 
 const DOMYSLNE: Ustawienia = {
@@ -31,6 +33,28 @@ const DOMYSLNE: Ustawienia = {
   podpisMaila: 'automat ewidencji przebiegu pojazdu',
   adresAplikacji: '',
   kopiaPowiadomien: null,
+  odstepMiedzyMailamiS: 8,
+}
+
+/** Ile sekund odczekać przed KOLEJNĄ wiadomością.
+ *
+ *  Po co: 2026-10-21 trzynaście niemal identycznych wiadomości wyszło w trzynaście
+ *  sekund i Gmail wrzucił je do spamu jako wysyłkę masową. Rozciągnięcie serii nie
+ *  zastąpi poprawnego DMARC/DKIM, ale usuwa najbardziej rzucający się w oczy sygnał.
+ *
+ *  Odstęp jest skracany, gdy wiadomości jest dużo: całe wywołanie funkcji brzegowej ma
+ *  twardy limit czasu (ok. 150 s), a potok GPS czeka na odpowiedź tylko kilka minut.
+ *  Lepiej wysłać trzynaście maili co 6 sekund niż stracić połowę na przekroczeniu
+ *  limitu w połowie serii. */
+export function odstepSekund(u: Ustawienia, ileWiadomosci: number) {
+  if (ileWiadomosci <= 1) return 0
+  const BUDZET_S = 80
+  return Math.max(0, Math.min(u.odstepMiedzyMailamiS, BUDZET_S / (ileWiadomosci - 1)))
+}
+
+export function odczekaj(sekundy: number) {
+  if (sekundy <= 0) return Promise.resolve()
+  return new Promise((gotowe) => setTimeout(gotowe, sekundy * 1000))
 }
 
 export async function wczytajUstawienia(supabase: Klient): Promise<Ustawienia> {
@@ -44,11 +68,14 @@ export async function wczytajUstawienia(supabase: Klient): Promise<Ustawienia> {
       (data as { klucz: string; wartosc: string }[]).map((w) => [w.klucz, (w.wartosc ?? '').trim()]),
     )
     const kopia = m.get('kopia_powiadomien') ?? ''
+    const odstep = Number(m.get('odstep_miedzy_mailami_s'))
     return {
       nazwaPodatnika: m.get('nazwa_podatnika') ?? DOMYSLNE.nazwaPodatnika,
       podpisMaila: m.get('podpis_maila') || DOMYSLNE.podpisMaila,
       adresAplikacji: m.get('adres_aplikacji') ?? DOMYSLNE.adresAplikacji,
       kopiaPowiadomien: kopia === '' ? null : kopia,
+      odstepMiedzyMailamiS: Number.isFinite(odstep) && odstep >= 0
+        ? odstep : DOMYSLNE.odstepMiedzyMailamiS,
     }
   } catch (err) {
     console.error('Nie udało się wczytać ustawień:', err)

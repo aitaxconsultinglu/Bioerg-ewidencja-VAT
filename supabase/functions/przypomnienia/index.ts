@@ -14,7 +14,7 @@
 import { createClient } from 'jsr:@supabase/supabase-js@2'
 import { opisBledu, zapiszWDzienniku } from './dziennik.ts'
 import { wyslijMaila } from './poczta.ts'
-import { stopkaMaila, wczytajUstawienia } from './ustawienia.ts'
+import { odczekaj, odstepSekund, stopkaMaila, wczytajUstawienia } from './ustawienia.ts'
 import {
   czyZapytanieWstepne, odpowiedzJSON, odpowiedzWstepna, tylkoSerwis, ustalWolajacego,
 } from './brama.ts'
@@ -246,10 +246,20 @@ Deno.serve(async (req) => {
   const termin = terminRoboczy(2)
   let wyslano = 0
 
+  // Przerwa miedzy wiadomosciami - patrz odstepSekund w ustawienia.ts. Seria maili
+  // wychodzaca w kilkanascie sekund wyglada dla filtrow jak wysylka masowa.
+  const odstep = odstepSekund(ust, wgKierownika.size)
+  let pierwsza = true
+
   for (const [kierownikId, wpis] of wgKierownika) {
     const { data: profil } = await supabase
       .from('profiles').select('email, imie_nazwisko').eq('id', kierownikId).single()
     if (!profil?.email) continue
+
+    // Odczekujemy PRZED kazda kolejna wiadomoscia, nie po ostatniej - inaczej funkcja
+    // trzymalaby polaczenie bez powodu.
+    if (!pierwsza) await odczekaj(odstep)
+    pierwsza = false
 
     const lista = [...new Set(wpis.pozycje)].sort()
     const poprawki = [...new Set(wpis.poprawki)].sort()
@@ -335,7 +345,7 @@ Deno.serve(async (req) => {
   }
 
   return odpowiedzJSON({
-    wyslano, termin, podglad: podglad ? podgladNa : undefined,
+    wyslano, termin, odstep_s: odstep, podglad: podglad ? podgladNa : undefined,
     okres: `${najnowszy.rok}-${String(najnowszy.miesiac).padStart(2, '0')}`,
   })
 })
