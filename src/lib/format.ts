@@ -12,6 +12,54 @@ export function celDoUzupelnienia(cel: string | null | undefined) {
   return !cel || cel.trim() === '' || cel.startsWith('(do uzupełnienia')
 }
 
+export const OSTRZEZENIE_OGOLNY_CEL =
+  'Zbyt ogólny cel - upewnij się, że podałeś nazwę kontrahenta i zadanie wykonane pod tym adresem.'
+
+/** Sformułowania, które same w sobie nie mówią NIC o tym, po co pojazd tam pojechał.
+ *  Lista jest jawna i krótka, bo ma być zrozumiała dla kierownika: każdy z tych zwrotów
+ *  pasuje do dowolnego wyjazdu w firmie i przy kontroli nie broni ani jednego kilometra.
+ *  Wrzesień 2026 miał 627 tras z samym "prace remontowe" - stąd ta kontrola. */
+const CELE_ZBYT_OGOLNE = [
+  'prace remontowe', 'prace', 'remont', 'realizacja zlecenia', 'realizacja prac',
+  'wyjazd', 'wyjazd służbowy', 'wyjazd sluzbowy', 'dojazd', 'powrót', 'powrot',
+  'zaopatrzenie', 'transport', 'transport materiałów', 'transport materialow',
+  'serwis', 'naprawa', 'praca', 'robota', 'zlecenie', 'nie dotyczy', 'brak',
+]
+
+/** Cele krótkie, ale w pełni konkretne - nie wymagają nazwy kontrahenta, bo mówią wprost,
+ *  po co pojazd tam pojechał. Dwa pierwsze nadaje sam potok GPS; gdyby je podświetlać,
+ *  aplikacja krzyczałaby na własne, poprawne wpisy. */
+const CELE_KROTKIE_ALE_KONKRETNE = [
+  'tankowanie paliwa', 'auto u mechanika', 'wulkanizacja', 'myjnia',
+  'przegląd techniczny', 'przeglad techniczny', 'badanie techniczne', 'naprawa opony',
+]
+
+/** Czy cel jest wpisany, ale tak ogólny, że nic nie wnosi.
+ *
+ *  Dwa warunki, oba konieczne - chodzi o to, żeby nie krzyczeć na poprawne wpisy:
+ *   1) cel po sprowadzeniu do małych liter i bez końcowej interpunkcji jest DOKŁADNIE
+ *      jednym ze zwrotów z listy powyżej, ALBO jest krótszy niż 20 znaków;
+ *   2) nie zawiera nazwy własnej - czyli żadnego słowa pisanego wielką literą poza
+ *      pierwszym. Nazwa kontrahenta ("Synthos", "PKN Orlen", "Komagra") taką nazwą jest,
+ *      więc "Prace remontowe w ramach zlecenia dla Synthos Dwory" przechodzi, a samo
+ *      "Prace remontowe" - nie.
+ *
+ *  To ostrzeżenie, nie blokada. Kierownik może mieć rację w sytuacji, której nie
+ *  przewidzieliśmy, a ewidencja nie może się zablokować przez naszą heurystykę. */
+export function celZbytOgolny(cel: string | null | undefined) {
+  if (celDoUzupelnienia(cel)) return false
+  const tekst = String(cel).trim()
+  const uproszczony = tekst.toLowerCase().replace(/[.,;:!?)\s]+$/, '')
+  if (CELE_KROTKIE_ALE_KONKRETNE.includes(uproszczony)) return false
+
+  const naLiscie = CELE_ZBYT_OGOLNE.includes(uproszczony)
+  if (!naLiscie && tekst.length >= 20) return false
+
+  const maNazweWlasna = tekst.split(/\s+/).slice(1)
+    .some((slowo) => /^[A-ZĄĆĘŁŃÓŚŹŻ]/.test(slowo))
+  return !maNazweWlasna
+}
+
 export function miesiacRok(rok: number, miesiac: number) {
   return `${MIESIACE_PL[miesiac - 1]} ${rok}`
 }

@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import type { PoleEdytowalne, Trasa } from '@/lib/types'
-import { celDoUzupelnienia, dataPL, formatujKm, km, sumaKm } from '@/lib/format'
+import {
+  OSTRZEZENIE_OGOLNY_CEL, celDoUzupelnienia, celZbytOgolny, dataPL, formatujKm, km, sumaKm,
+} from '@/lib/format'
 import { cn } from '@/lib/utils'
 
 interface Props {
@@ -82,14 +84,20 @@ export function TabelaTras({ trasy, zablokowana, zapisz }: Props) {
     const brakuje =
       (pole === 'cel_wyjazdu' && celDoUzupelnienia(wartosc)) ||
       (pole === 'kierowca' && wartosc.trim() === '')
+    // Cel jest wpisany, ale nie mowi, po co pojazd tam pojechal - patrz celZbytOgolny.
+    // Na czerwono, a nie na bursztynowo jak brak: brak widac od razu, a "prace remontowe"
+    // wyglada na wypelnione i wlasnie dlatego przechodzi bez zastanowienia.
+    const ogolny = pole === 'cel_wyjazdu' && celZbytOgolny(wartosc)
 
     return (
       <td
+        title={ogolny ? OSTRZEZENIE_OGOLNY_CEL : undefined}
         className={cn(
           'komorka relative',
           !zablokowana && 'komorka-edytowalna',
           wZaznaczeniu && 'ring-2 ring-inset ring-blekit-ciemny',
           brakuje && 'bg-amber-50',
+          ogolny && 'bg-red-50',
         )}
         onMouseDown={(e) => {
           if (zablokowana) return
@@ -120,7 +128,10 @@ export function TabelaTras({ trasy, zablokowana, zapisz }: Props) {
             className="w-full select-text bg-white text-sm outline-none"
           />
         ) : (
-          <span className={cn(brakuje && 'italic text-amber-700')}>{wartosc}</span>
+          <span className={cn(brakuje && 'italic text-amber-700', ogolny && 'text-red-700')}>
+            {wartosc}
+            {ogolny && <span className="ml-1 font-semibold" aria-hidden>!</span>}
+          </span>
         )}
 
         {!zablokowana && !wEdycji && aktywna?.wiersz === wiersz && aktywna.pole === pole && (
@@ -139,12 +150,28 @@ export function TabelaTras({ trasy, zablokowana, zapisz }: Props) {
     )
   }
 
+  // Liczone przy kazdym renderze, ale to kilkaset wierszy i jedno porownanie tekstu -
+  // taniej niz pilnowanie, kiedy uniewaznic zapamietany wynik.
+  const zbytOgolne = trasy.filter((t) => celZbytOgolny(t.cel_wyjazdu)).length
+
   return (
     <div>
       {!zablokowana && (
         <p className="mb-2 text-xs text-slate-500">
           Kliknij komórkę, aby ją zaznaczyć, kliknij dwukrotnie, aby edytować. Niebieski
           kwadrat w rogu zaznaczenia przeciągnij w dół, aby skopiować wartość na kolejne wiersze.
+        </p>
+      )}
+
+      {zbytOgolne > 0 && (
+        <p className="mb-2 rounded border border-red-200 bg-red-50 px-3 py-2 text-xs text-red-800">
+          <span className="font-semibold">
+            {zbytOgolne === 1
+              ? 'Jedna pozycja ma zbyt ogólny cel wyjazdu'
+              : `Pozycji ze zbyt ogólnym celem wyjazdu: ${zbytOgolne}`}
+          </span>{' '}
+          (zaznaczone na czerwono). {OSTRZEZENIE_OGOLNY_CEL} Sam zapis „prace remontowe”
+          pasuje do każdego wyjazdu i przy kontroli nie broni ani jednego kilometra.
         </p>
       )}
 
