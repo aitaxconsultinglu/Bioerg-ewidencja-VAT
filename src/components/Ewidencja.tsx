@@ -198,6 +198,39 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
     else await wczytaj()
   }
 
+  /** Buduje PDF archiwalny na nowo dla ewidencji JUZ ZAAKCEPTOWANEJ, bez ruszania statusu,
+   *  podpisu kierownika ani podpisu akceptacji.
+   *
+   *  Po co: zarchiwizowany plik powstaje w chwili akceptacji. Jesli dane trasy zostana
+   *  pozniej poprawione - a 2026-10-22 poprawiono we wrzesniu nazwy kontrahentow w celach
+   *  wyjazdu takze w ewidencjach zaakceptowanych - podpisany PDF przestaje sie zgadzac
+   *  z tym, co jest w bazie. Dokument VAT i dane, z ktorych powstal, musza mowic to samo.
+   *
+   *  Alternatywa bylaby odblokowanie i ponowna akceptacja, ale to kasuje podpis
+   *  akceptacji i kaze ksiegowosci podpisywac sie drugi raz pod czyms, co juz zatwierdzila. */
+  async function odswiezPdf() {
+    if (!ewidencja) return
+    setZajety(true)
+    setBlad(null)
+    try {
+      const pdf = await zbudujPdf(ewidencja, trasy)
+      const sciezka = ewidencja.pdf_path ?? `${ewidencja.rok}/${nazwaPliku(ewidencja, 'pdf')}`
+      const { error: bladPliku } = await supabase.storage
+        .from('ewidencje').upload(sciezka, pdf, { contentType: 'application/pdf', upsert: true })
+      if (bladPliku) throw bladPliku
+      if (!ewidencja.pdf_path) {
+        const { error } = await supabase.from('monthly_logs')
+          .update({ pdf_path: sciezka }).eq('id', logId)
+        if (error) throw error
+      }
+      await wczytaj()
+    } catch (e) {
+      setBlad(e instanceof Error ? e.message : String(e))
+    } finally {
+      setZajety(false)
+    }
+  }
+
   async function zaakceptuj() {
     if (!ewidencja) return
     if (!podpisAkceptacji.trim()) {
@@ -525,12 +558,19 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
         )}
 
         {ksiegowosc && zablokowana && (
-          <div className="flex items-center gap-3">
+          <div className="flex flex-wrap items-center gap-3">
             <p className="text-sm text-slate-600">
               Ewidencja jest zaakceptowana i zablokowana. Odblokowanie cofa ją do edycji i
               usuwa podpis akceptacji - po poprawkach trzeba zatwierdzić ją ponownie.
+              „Odśwież PDF” buduje plik archiwalny na nowo z bieżących danych, nie ruszając
+              statusu ani podpisów - do użycia, gdy dane poprawiono już po akceptacji.
             </p>
-            <Button wariant="akcent" disabled={zajety} onClick={odblokuj}>Odblokuj do edycji</Button>
+            <div className="flex gap-3">
+              <Button wariant="zwykly" disabled={zajety} onClick={odswiezPdf}>
+                Odśwież PDF
+              </Button>
+              <Button wariant="akcent" disabled={zajety} onClick={odblokuj}>Odblokuj do edycji</Button>
+            </div>
           </div>
         )}
       </div>
