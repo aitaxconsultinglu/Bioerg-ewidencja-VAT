@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import { MIN_DLUGOSC_HASLA, komunikatPL, sprawdzHaslo } from '@/lib/config'
+import { MIN_DLUGOSC_HASLA, hasloZWycieku, komunikatPL, sprawdzHaslo } from '@/lib/config'
 import { Button } from './ui/button'
 
 interface Props {
@@ -25,6 +25,15 @@ export function UstawHaslo({ powod, email, gotowe }: Props) {
     if (haslo !== powtorzone) { setBlad('Hasła nie są takie same.'); return }
 
     setZajety(true)
+    // Sprawdzenie w bazie wyciekow robimy sami, bo wbudowana ochrona Supabase jest
+    // dostepna dopiero od planu Pro. Samo haslo nie opuszcza przegladarki - patrz
+    // hasloZWycieku w config.ts.
+    if (await hasloZWycieku(haslo)) {
+      setZajety(false)
+      setBlad('To hasło pojawiło się w znanych wyciekach danych i nie jest już bezpieczne. '
+            + 'Wybierz inne - nawet proste, byle Twoje własne.')
+      return
+    }
     const { error } = await supabase.auth.updateUser({ password: haslo })
     if (error) {
       setZajety(false)

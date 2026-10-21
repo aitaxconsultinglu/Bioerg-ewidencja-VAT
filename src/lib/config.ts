@@ -33,6 +33,38 @@ export const TOLERANCJA_LICZNIKA_KM = 5
 export const MIN_DLUGOSC_HASLA = 10
 const ZNAKI_SPECJALNE = /[^A-Za-z0-9]/
 
+/** Czy hasło występuje w znanych wyciekach danych (baza HaveIBeenPwned).
+ *
+ *  DLACZEGO WŁASNY KOD, A NIE USTAWIENIE W SUPABASE. Supabase ma taką ochronę wbudowaną,
+ *  ale wyłącznie od planu Pro - na planie darmowym nie da się jej włączyć. Sprawdzenie
+ *  robimy więc sami; usługa HaveIBeenPwned jest bezpłatna i nie wymaga konta.
+ *
+ *  HASŁO NIE OPUSZCZA PRZEGLĄDARKI. Liczymy z niego skrót SHA-1 i wysyłamy tylko jego
+ *  PIERWSZE PIĘĆ ZNAKÓW. Serwis odsyła wszystkie skróty zaczynające się tak samo
+ *  (zwykle kilkaset) i dopasowania szukamy już u siebie. To standardowa metoda
+ *  k-anonimowości: po pięciu znakach skrótu nie da się odtworzyć hasła ani nawet
+ *  stwierdzić, którego z setek wariantów dotyczyło pytanie.
+ *
+ *  Gdy usługa nie odpowiada, przepuszczamy hasło. Niedostępność cudzego serwera nie może
+ *  zablokować pracownikowi ustawienia hasła - pozostałe wymagania (długość, znak
+ *  specjalny) i tak obowiązują. */
+export async function hasloZWycieku(haslo: string): Promise<boolean> {
+  try {
+    const bajty = new TextEncoder().encode(haslo)
+    const skrot = await crypto.subtle.digest('SHA-1', bajty)
+    const hex = [...new Uint8Array(skrot)]
+      .map((b) => b.toString(16).padStart(2, '0')).join('').toUpperCase()
+
+    const odp = await fetch(`https://api.pwnedpasswords.com/range/${hex.slice(0, 5)}`)
+    if (!odp.ok) return false
+    const reszta = hex.slice(5)
+    return (await odp.text()).split('\n')
+      .some((linia) => linia.split(':')[0].trim() === reszta)
+  } catch {
+    return false
+  }
+}
+
 /** Zwraca komunikat o błędzie albo null, gdy hasło spełnia wymagania. */
 export function sprawdzHaslo(haslo: string): string | null {
   if (haslo.length < MIN_DLUGOSC_HASLA) {
