@@ -52,17 +52,30 @@ const MIESIACE_PL = [
   'Lipiec', 'Sierpień', 'Wrzesień', 'Październik', 'Listopad', 'Grudzień',
 ]
 
+/** Co ile DNI powtarzamy przypomnienie - tak samo dla ewidencji niewyslanych
+ *  i odeslanych do poprawki (ujednolicone na zyczenie klienta 2026-10-21). */
 const ODSTEP_DNI = 2
-
-/** Odstep dla ewidencji ODESLANYCH DO POPRAWKI. Na zyczenie klienta z 2026-10-21 to
- *  rowniez co dwa dni, tak samo jak dla niewyslanych - wczesniej bylo codziennie.
- *  44 godziny, a nie 48, zeby przesuniecie uruchomienia o kilka minut nie kazalo czekac
- *  dodatkowej doby: przypomnienie wyslane o 6:30 ma sie powtorzyc co drugi dzien
- *  o 6:30, a nie co drugi dzien o 6:31. */
-const ODSTEP_GODZIN_POPRAWKA = 44
 
 /** O ktorej godzinie CZASU POLSKIEGO wychodza maile. */
 const GODZINA_WYSYLKI = 6
+
+/** Data w strefie Europe/Warsaw jako liczba dni - do liczenia odstepu miedzy
+ *  przypomnieniami.
+ *
+ *  DLACZEGO PO DATACH, A NIE PO GODZINACH. Pierwsza wersja porownywala "teraz minus
+ *  48 godzin" z chwila ostatniej wysylki. Wyglada rozsadnie, a cicho gubi dzien:
+ *  przypomnienia wychodza o 6:30, wiec gdy jedno poszlo recznie o 11:06, to dwie doby
+ *  mijaja o 11:06 - czyli JUZ PO porannym uruchomieniu. Zadanie dwa dni pozniej widzi
+ *  43 godziny zamiast 48 i milczy, a mail idzie dopiero trzeciego dnia. Sprawdzone na
+ *  zywych danych 2026-10-22: przypomnienie wyslane 21.10 o 11:06 wypadloby 24.10,
+ *  a nie 23.10. Roznica dat nie zalezy od pory dnia i mowi dokladnie to, co obiecujemy
+ *  kierownikowi: "co dwa dni". */
+function dzienWPolsce(d: Date) {
+  const [rok, miesiac, dzien] = new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Warsaw', year: 'numeric', month: '2-digit', day: '2-digit',
+  }).format(d).split('-').map(Number)
+  return Math.floor(Date.UTC(rok, miesiac - 1, dzien) / 86_400_000)
+}
 
 /** Godzina w strefie Europe/Warsaw. pg_cron zna wylacznie UTC i nie obsluguje zmiany
  *  czasu, dlatego zadanie chodzi o 04:30 i 05:30 UTC, a ten warunek przepuszcza tylko
@@ -183,8 +196,7 @@ Deno.serve(async (req) => {
   const ust = await wczytajUstawienia(supabase)
   const KOPIA_PRZYPOMNIEN = ust.kopiaPowiadomien
 
-  const progNiewyslane = new Date(Date.now() - ODSTEP_DNI * 86_400_000)
-  const progPoprawki = new Date(Date.now() - ODSTEP_GODZIN_POPRAWKA * 3_600_000)
+  const dzisiaj = dzienWPolsce(new Date())
 
   // Ponaglamy WYLACZNIE najnowszy zaimportowany okres. Bez tego ograniczenia zadanie
   // sciagaloby kierownika takze za miesiace sprzed pol roku, mieszajac je w jednym
@@ -217,8 +229,7 @@ Deno.serve(async (req) => {
     // Odstep liczymy od ostatniego przypomnienia, a jesli go nie bylo - od powiadomienia
     // o nowej ewidencji (albo od jej utworzenia, gdy powiadomienie nie poszlo).
     const odniesienie = e.last_reminder_sent_at ?? e.powiadomienie_wyslane_at ?? e.utworzono
-    const prog = e.status === 'odeslana_do_poprawki' ? progPoprawki : progNiewyslane
-    return new Date(odniesienie) < prog
+    return dzisiaj - dzienWPolsce(new Date(odniesienie)) >= ODSTEP_DNI
   })
 
   // Pozycje rozdzielone na dwie listy, bo w mailu znacza co innego: jedna to "jeszcze
