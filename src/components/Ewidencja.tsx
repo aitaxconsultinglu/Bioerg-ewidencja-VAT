@@ -341,6 +341,29 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
         <ArrowLeft className="h-4 w-4" /> Wróć do listy
       </button>
 
+      {/* Na gorze strony, nie na dole: ksiegowosc otwiera zablokowana ewidencje wlasnie po
+          to, zeby ja odblokowac albo odswiezyc plik, a przy kilkuset wierszach tabeli
+          przyciski na koncu strony sa praktycznie nie do znalezienia. */}
+      {ksiegowosc && zablokowana && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
+          <p className="max-w-3xl text-sm text-amber-900">
+            <span className="font-semibold">Ewidencja jest zaakceptowana i zablokowana.</span>{' '}
+            Odblokowanie cofa ją do edycji i usuwa podpis akceptacji - po poprawkach trzeba
+            zatwierdzić ją ponownie. „Odśwież PDF” buduje plik archiwalny na nowo z bieżących
+            danych, nie ruszając statusu ani podpisów - do użycia, gdy dane poprawiono już
+            po akceptacji.
+          </p>
+          <div className="flex gap-3">
+            <Button wariant="zwykly" disabled={zajety} onClick={odswiezPdf}>
+              Odśwież PDF
+            </Button>
+            <Button wariant="akcent" disabled={zajety} onClick={odblokuj}>
+              Odblokuj do edycji
+            </Button>
+          </div>
+        </div>
+      )}
+
       <div className="rounded-lg border border-slate-200 bg-white p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
           <div>
@@ -475,6 +498,7 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
         />
       </div>
 
+      {(mozeWyslac || ksiegowoscMozeDzialac) && (
       <div className="flex flex-wrap items-end justify-between gap-4 rounded-lg border border-slate-200 bg-white p-4">
         {mozeWyslac && (
           <>
@@ -556,24 +580,8 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
             </div>
           </>
         )}
-
-        {ksiegowosc && zablokowana && (
-          <div className="flex flex-wrap items-center gap-3">
-            <p className="text-sm text-slate-600">
-              Ewidencja jest zaakceptowana i zablokowana. Odblokowanie cofa ją do edycji i
-              usuwa podpis akceptacji - po poprawkach trzeba zatwierdzić ją ponownie.
-              „Odśwież PDF” buduje plik archiwalny na nowo z bieżących danych, nie ruszając
-              statusu ani podpisów - do użycia, gdy dane poprawiono już po akceptacji.
-            </p>
-            <div className="flex gap-3">
-              <Button wariant="zwykly" disabled={zajety} onClick={odswiezPdf}>
-                Odśwież PDF
-              </Button>
-              <Button wariant="akcent" disabled={zajety} onClick={odblokuj}>Odblokuj do edycji</Button>
-            </div>
-          </div>
-        )}
       </div>
+      )}
 
       <details className="rounded-lg border border-slate-200 bg-white p-4">
         <summary className="cursor-pointer text-sm font-medium">Dziennik zmian ({audyt.length})</summary>
