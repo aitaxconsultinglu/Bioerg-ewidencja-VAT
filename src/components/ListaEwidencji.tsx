@@ -166,6 +166,43 @@ export function ListaEwidencji({ profil, otworz }: Props) {
     }
   }
 
+  /** Buduje archiwalne PDF-y na nowo dla WSZYSTKICH zaakceptowanych ewidencji okresu,
+   *  nie ruszajac statusu ani zadnego podpisu.
+   *
+   *  Po co zbiorczo: plik archiwalny powstaje w chwili akceptacji, wiec kazda pozniejsza
+   *  poprawka danych rozjezdza go z baza. Przy poprawkach obejmujacych kilkanascie
+   *  ewidencji naraz - a takie byly 22 i 25 pazdziernika - klikanie po jednej jest
+   *  droga do tego, zeby o ktoras zapomniec. */
+  async function odswiezWszystkiePdf() {
+    setBlad(null)
+    const zaakceptowane = wZakladce.filter((p) => p.status === 'zaakceptowana')
+    if (zaakceptowane.length === 0) return
+    const pozycjeZTrasami = await pobierzTrasy(zaakceptowane)
+    let zrobione = 0
+    try {
+      for (const { ewidencja, trasy } of pozycjeZTrasami) {
+        zrobione++
+        setPostep(`Odświeżam ${zrobione} z ${pozycjeZTrasami.length}: ${ewidencja.vehicles.nr_rejestracyjny}...`)
+        const pdf = await zbudujPdf(ewidencja, trasy)
+        const sciezka = ewidencja.pdf_path ?? `${ewidencja.rok}/${nazwaPliku(ewidencja, 'pdf')}`
+        const { error: bladPliku } = await supabase.storage
+          .from('ewidencje').upload(sciezka, pdf, { contentType: 'application/pdf', upsert: true })
+        if (bladPliku) throw bladPliku
+        if (!ewidencja.pdf_path) {
+          const { error } = await supabase.from('monthly_logs')
+            .update({ pdf_path: sciezka }).eq('id', ewidencja.id)
+          if (error) throw error
+        }
+      }
+      setPostep(`Gotowe - odświeżono ${pozycjeZTrasami.length} plików.`)
+      setTimeout(() => setPostep(null), 4000)
+      await wczytaj()
+    } catch (e) {
+      setBlad(e instanceof Error ? e.message : String(e))
+      setPostep(null)
+    }
+  }
+
   async function zaakceptujWszystkie() {
     setOknoAkceptacji(false)
     setBlad(null)
@@ -252,6 +289,15 @@ export function ListaEwidencji({ profil, otworz }: Props) {
           <Button disabled={!!postep} onClick={() => void paczka('xlsx')}>
             <FileSpreadsheet className="h-4 w-4" /> Wszystkie Excel (.zip)
           </Button>
+          {wZakladce.some((p) => p.status === 'zaakceptowana') && (
+            <Button
+              disabled={!!postep}
+              onClick={() => void odswiezWszystkiePdf()}
+              title="Buduje archiwalne PDF-y na nowo z bieżących danych. Nie zmienia statusu ani podpisów."
+            >
+              Odśwież wszystkie PDF
+            </Button>
+          )}
           {postep && <span className="text-sm text-blekit-ciemny">{postep}</span>}
         </div>
       )}

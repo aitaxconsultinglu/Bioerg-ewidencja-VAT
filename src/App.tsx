@@ -9,6 +9,7 @@ import { ListaEwidencji } from './components/ListaEwidencji'
 import { Ewidencja } from './components/Ewidencja'
 import { Uzytkownicy } from './components/Uzytkownicy'
 import { HistoriaMaili } from './components/HistoriaMaili'
+import { JakToDziala } from './components/JakToDziala'
 import { Button } from './components/ui/button'
 
 export default function App() {
@@ -19,6 +20,7 @@ export default function App() {
   const [odzyskiwanie, setOdzyskiwanie] = useState(false)
   const [zmianaHasla, setZmianaHasla] = useState(false)
   const [ekranUzytkownikow, setEkranUzytkownikow] = useState(false)
+  const [ekranInstrukcji, setEkranInstrukcji] = useState(false)
   const [ekranHistoriiMaili, setEkranHistoriiMaili] = useState(false)
 
   const wczytajProfil = useCallback(async (userId: string) => {
@@ -99,7 +101,7 @@ export default function App() {
   return (
     <div className="min-h-screen">
       <header className="border-b border-slate-200 bg-white">
-        <div className="mx-auto grid max-w-7xl grid-cols-[1fr_auto_1fr] items-center gap-4 px-4 py-3">
+        <div className="mx-auto grid max-w-7xl grid-cols-[auto_1fr_auto] items-center gap-4 px-4 py-3">
           <div className="flex items-center gap-3">
             <div className="h-8 w-1.5 rounded bg-limonka" />
             <div>
@@ -112,35 +114,53 @@ export default function App() {
             alt="Logo"
             className="h-8 w-auto justify-self-center"
           />
-          <div className="flex items-center justify-end gap-4">
+          <div className="flex flex-nowrap items-center justify-end gap-2">
             <div className="text-right">
               <p className="text-sm font-medium leading-tight">{profil.imie_nazwisko}</p>
               <p className="text-xs text-slate-500">
                 {profil.rola === 'ksiegowosc' ? 'księgowość' : 'kierownik'}
               </p>
             </div>
+            {/* Kompaktowe i bez zawijania: przy pieciu przyciskach domyslny rozmiar
+                lamal pasek na dwie linie i rozjezdzal naglowek. */}
             {profil.rola === 'ksiegowosc' && (
               <>
-                <Button onClick={() => {
-                  setEkranHistoriiMaili(true); setEkranUzytkownikow(false); setOtwartaEwidencja(null)
+                <Button className="whitespace-nowrap px-3 py-1.5 text-xs" onClick={() => {
+                  setEkranHistoriiMaili(true); setEkranUzytkownikow(false)
+                  setEkranInstrukcji(false); setOtwartaEwidencja(null)
                 }}>
                   Wysłane maile
                 </Button>
-                <Button onClick={() => {
-                  setEkranUzytkownikow(true); setEkranHistoriiMaili(false); setOtwartaEwidencja(null)
+                <Button className="whitespace-nowrap px-3 py-1.5 text-xs" onClick={() => {
+                  setEkranUzytkownikow(true); setEkranHistoriiMaili(false)
+                  setEkranInstrukcji(false); setOtwartaEwidencja(null)
                 }}>
                   Użytkownicy
                 </Button>
               </>
             )}
-            <Button onClick={() => setZmianaHasla(true)}>Zmień hasło</Button>
-            <Button onClick={() => supabase.auth.signOut()}>Wyloguj</Button>
+            <Button className="whitespace-nowrap px-3 py-1.5 text-xs" onClick={() => {
+              setEkranInstrukcji(true); setEkranHistoriiMaili(false)
+              setEkranUzytkownikow(false); setOtwartaEwidencja(null)
+            }}>
+              Jak to działa
+            </Button>
+            <Button className="whitespace-nowrap px-3 py-1.5 text-xs"
+                    onClick={() => setZmianaHasla(true)}>
+              Zmień hasło
+            </Button>
+            <Button className="whitespace-nowrap px-3 py-1.5 text-xs"
+                    onClick={() => supabase.auth.signOut()}>
+              Wyloguj
+            </Button>
           </div>
         </div>
       </header>
 
       <main className="mx-auto max-w-7xl px-4 py-6">
-        {ekranHistoriiMaili && profil.rola === 'ksiegowosc' ? (
+        {ekranInstrukcji ? (
+          <JakToDziala profil={profil} naListe={() => setEkranInstrukcji(false)} />
+        ) : ekranHistoriiMaili && profil.rola === 'ksiegowosc' ? (
           <HistoriaMaili profil={profil} naListe={() => setEkranHistoriiMaili(false)} />
         ) : ekranUzytkownikow && profil.rola === 'ksiegowosc' ? (
           <Uzytkownicy profil={profil} naListe={() => setEkranUzytkownikow(false)} />

@@ -247,7 +247,7 @@ export function TabelaTras({
               : `Pozycji z pustym albo zbyt ogólnym celem wyjazdu: ${zbytOgolne}`}
           </span>{' '}
           (zaznaczone na czerwono). {OSTRZEZENIE_OGOLNY_CEL} Sam zapis „prace remontowe”
-          pasuje do każdego wyjazdu i przy kontroli nie broni ani jednego kilometra.
+          jest zbyt ogólny.
         </p>
       )}
 
