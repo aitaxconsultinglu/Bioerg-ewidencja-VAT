@@ -391,7 +391,7 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
           </div>
         </div>
 
-        <dl className="mt-4 grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-5">
+        <dl className="mt-4 grid grid-cols-2 gap-x-6 gap-y-2 text-sm sm:grid-cols-3 lg:grid-cols-6">
           <div>
             <dt className="text-slate-500">Licznik - początek</dt>
             <dd className="font-medium tabular-nums">{licznik(ewidencja.stan_licznika_poczatek)}</dd>
@@ -403,6 +403,20 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
                 zaokrągleniu tras do 0,1 km. */}
             <dd className="font-medium tabular-nums">
               {licznik((ewidencja.stan_licznika_poczatek ?? 0) + sumaKm(trasy))}
+            </dd>
+          </div>
+          <div>
+            {/* Odczyt z deski rozdzielczej to jedyne, co pozwala stwierdzic, czy suma
+                kilometrow z GPS odpowiada rzeczywistosci. Siedemnascie ewidencji za
+                wrzesien przeszlo bez niego (kontrola byla wtedy tylko w przegladarce,
+                wiec stara karta ja omijala) - ksiegowosc musi to widziec, zanim
+                zatwierdzi dokument. */}
+            <dt className="text-slate-500">Odczyt licznika</dt>
+            <dd className="font-medium tabular-nums">
+              {ewidencja.stan_licznika_koniec_rzeczywisty !== null
+                && ewidencja.stan_licznika_koniec_rzeczywisty !== undefined
+                ? licznik(ewidencja.stan_licznika_koniec_rzeczywisty)
+                : <span className="text-sm font-medium text-amber-700">brak odczytu</span>}
             </dd>
           </div>
           <div>

@@ -15,7 +15,12 @@ interface WierszUzytkownika {
   rola: Rola
   wymaga_zmiany_hasla: boolean
   chroniony: boolean
-  ostatnie_logowanie: string | null
+  /** NIE jest to last_sign_in_at z Supabase - ta kolumna zmienia sie wylacznie przy
+   *  logowaniu haslem, wiec przy podtrzymywanej sesji potrafi sie nie ruszyc przez
+   *  miesiac, a dla konta, ktore weszlo linkiem, zostaje pusta na zawsze. Tu jest
+   *  najpozniejsza z trzech rzeczy: logowania haslem, odswiezenia sesji i wpisu
+   *  w dzienniku zmian (patrz lista_uzytkownikow w bazie). */
+  ostatnia_aktywnosc: string | null
   liczba_pojazdow: number
 }
 
@@ -178,7 +183,7 @@ export function Uzytkownicy({ profil, naListe }: Props) {
               <th className="px-4 py-3">Login</th>
               <th className="px-4 py-3">Rola</th>
               <th className="px-4 py-3 text-right">Pojazdy</th>
-              <th className="px-4 py-3">Ostatnie logowanie</th>
+              <th className="px-4 py-3">Ostatnia aktywność</th>
               <th className="px-4 py-3"></th>
             </tr>
           </thead>
@@ -209,9 +214,9 @@ export function Uzytkownicy({ profil, naListe }: Props) {
                   {u.rola === 'ksiegowosc' ? 'wszystkie' : u.liczba_pojazdow}
                 </td>
                 <td className="px-4 py-3 text-sm text-slate-600">
-                  {u.ostatnie_logowanie
-                    ? dataGodzinaPL(u.ostatnie_logowanie)
-                    : <span className="text-amber-700">nigdy się nie logował</span>}
+                  {u.ostatnia_aktywnosc
+                    ? dataGodzinaPL(u.ostatnia_aktywnosc)
+                    : <span className="text-amber-700">brak śladu aktywności</span>}
                 </td>
                 <td className="px-4 py-3 text-right">
                   <div className="flex justify-end gap-2">
