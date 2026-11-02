@@ -264,8 +264,9 @@ Deno.serve(async (req) => {
 
   for (const [kierownikId, wpis] of wgKierownika) {
     const { data: profil } = await supabase
-      .from('profiles').select('email, imie_nazwisko').eq('id', kierownikId).single()
-    if (!profil?.email) continue
+      .from('profiles').select('email, imie_nazwisko, bez_powiadomien')
+      .eq('id', kierownikId).single()
+    if (!profil?.email || profil.bez_powiadomien) continue
 
     // Odczekujemy PRZED kazda kolejna wiadomoscia, nie po ostatniej - inaczej funkcja
     // trzymalaby polaczenie bez powodu.

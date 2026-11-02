@@ -93,7 +93,11 @@ Deno.serve(async (req) => {
   // Wszyscy z rolą księgowości - nie wiemy z góry, kto akurat zajmuje się zamknięciem
   // miesiąca, więc zawiadamiamy cały zespół.
   const { data: ksiegowi } = await supabase
-    .from('profiles').select('id, email, imie_nazwisko').eq('rola', 'ksiegowosc')
+    // Konto z bez_powiadomien = true ma dostep do aplikacji, ale nie dostaje z niej poczty
+    // (klient wylaczyl 2026-11-02 dwa adresy ksiegowosci). Filtrujemy w zapytaniu, zeby
+    // taki adres nie trafil nawet do dziennika wysylek jako "pominiety".
+    .from('profiles').select('id, email, imie_nazwisko')
+    .eq('rola', 'ksiegowosc').eq('bez_powiadomien', false)
 
   if (!ksiegowi?.length) {
     return odpowiedz({ error: 'Brak kont z rolą księgowości' }, 404)

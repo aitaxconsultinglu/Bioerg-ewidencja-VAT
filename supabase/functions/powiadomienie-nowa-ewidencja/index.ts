@@ -171,14 +171,16 @@ Deno.serve(async (req) => {
   // jest najwieksza (caly tabor 1. dnia miesiaca) i to ona 2026-10-21 trafila do spamu
   // jako trzynascie niemal identycznych maili w trzynascie sekund.
   const { count: ileKsiegowych } = await supabase
-    .from('profiles').select('id', { count: 'exact', head: true }).eq('rola', 'ksiegowosc')
+    .from('profiles').select('id', { count: 'exact', head: true })
+    .eq('rola', 'ksiegowosc').eq('bez_powiadomien', false)
   const odstep = podglad ? 0 : odstepSekund(ust, wgKierownika.size + (ileKsiegowych ?? 0))
   let pierwsza = true
 
   for (const [kierownikId, wpis] of wgKierownika) {
     const lista = [...new Set(wpis.pojazdy)].sort()
     const { data: profil } = await supabase
-      .from('profiles').select('email, imie_nazwisko').eq('id', kierownikId).single()
+      .from('profiles').select('email, imie_nazwisko, bez_powiadomien')
+      .eq('id', kierownikId).single()
     if (!profil?.email) {
       // Kierownik bez adresu to powod, dla ktorego ewidencja nie zostanie podjeta -
       // musi byc widoczny w dzienniku, a nie tylko w logach funkcji.
@@ -189,6 +191,9 @@ Deno.serve(async (req) => {
       })
       continue
     }
+    // Konto z bez_powiadomien = true ma dostep do aplikacji, ale nie dostaje z niej poczty.
+    if (profil.bez_powiadomien) continue
+
     // W podgladzie wystarczy jedna probka wariantu "kierownik".
     if (podglad && !podgladWszyscy && doKierownikow > 0) continue
 
@@ -242,7 +247,11 @@ Deno.serve(async (req) => {
   )].sort()
 
   const { data: ksiegowi } = await supabase
-    .from('profiles').select('id, email, imie_nazwisko').eq('rola', 'ksiegowosc')
+    // Konto z bez_powiadomien = true ma dostep do aplikacji, ale nie dostaje z niej poczty
+    // (klient wylaczyl 2026-11-02 dwa adresy ksiegowosci). Filtrujemy w zapytaniu, zeby
+    // taki adres nie trafil nawet do dziennika wysylek jako "pominiety".
+    .from('profiles').select('id, email, imie_nazwisko')
+    .eq('rola', 'ksiegowosc').eq('bez_powiadomien', false)
 
   for (const k of ksiegowi ?? []) {
     if (!k.email) continue

@@ -95,7 +95,8 @@ Deno.serve(async (req) => {
   }
 
   const { data: profil } = await supabase
-    .from('profiles').select('email, imie_nazwisko').eq('id', pojazd.kierownik_id).single()
+    .from('profiles').select('email, imie_nazwisko, bez_powiadomien')
+    .eq('id', pojazd.kierownik_id).single()
   if (!profil?.email) {
     // Zapisujemy nawet to: brak adresu u kierownika jest powodem, dla którego
     // wiadomość nie wyszła, i księgowość musi to zobaczyć w dzienniku.
@@ -111,6 +112,12 @@ Deno.serve(async (req) => {
       blad: 'Kierownik nie ma zapisanego adresu e-mail',
     })
     return odpowiedz({ error: 'Kierownik bez adresu e-mail' }, 404)
+  }
+
+  if (profil.bez_powiadomien) {
+    // Konto wylaczone z powiadomien - odesłanie do poprawki i tak sie odbylo,
+    // widac je w aplikacji; nie wysylamy tylko maila.
+    return odpowiedz({ ok: true, pominieto: 'konto wyłączone z powiadomień' })
   }
 
   const okres = `${MIESIACE_PL[e.miesiac - 1]} ${e.rok}`
