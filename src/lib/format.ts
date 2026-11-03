@@ -87,8 +87,16 @@ const MINIMALNY_DYSTANS = 0.01
  *  zaokrągleniu dałby zero. */
 export function kmLiczba(wartosc: number | null | undefined) {
   const x = Number(wartosc ?? 0)
-  if (!(x > 0)) return 0
-  return Math.max(MINIMALNY_DYSTANS, Math.round(x * 100) / 100)
+  if (!Number.isFinite(x) || x === 0) return 0
+  const zaokraglona = Math.round(x * 100) / 100
+  // Pozycja korekcyjna z odczytu licznika BYWA UJEMNA - gdy GPS doliczył kilometry,
+  // których pojazd nie przejechał (zsumowany szum na terenie zakładu), odczyt z deski
+  // rozdzielczej jest niższy od sumy tras i korekta musi je odjąć. Wcześniejsze
+  // `if (!(x > 0)) return 0` zerowało taką pozycję: w kolumnie widniało 0,00, a suma
+  // „Razem" i wyliczony stan licznika pomijały korektę, więc dokument nadal nie zgadzał
+  // się z pojazdem (SC452GF, październik 2026: -182,32 km znikało bez śladu).
+  if (x < 0) return Math.min(-MINIMALNY_DYSTANS, zaokraglona)
+  return Math.max(MINIMALNY_DYSTANS, zaokraglona)
 }
 
 export function formatujKm(wartosc: number) {
