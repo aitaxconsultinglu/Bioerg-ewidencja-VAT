@@ -2,8 +2,10 @@ import { useCallback, useEffect, useState } from 'react'
 import { ArrowLeft, Download, FileSpreadsheet } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import type {
-  Ewidencja as TEwidencja, OznaczeniePola, PoleEdytowalne, Profil, Trasa, WpisAudytu,
+  Ewidencja as TEwidencja, OznaczeniePola, PoleEdytowalne, PoleTabeli, Profil, Trasa,
+  WpisAudytu,
 } from '@/lib/types'
+import { jestPolemGPS } from '@/lib/types'
 import {
   ETYKIETY_STATUSU, KOLORY_STATUSU, celDoUzupelnienia,
   dataGodzinaPL, formatujKm, licznik, miesiacRok, sumaKm,
@@ -11,6 +13,7 @@ import {
 import { cn } from '@/lib/utils'
 import { nazwaPliku, pobierzExcel, pobierzPdf, zbudujPdf } from '@/lib/eksport'
 import { TOLERANCJA_LICZNIKA_KM } from '@/lib/config'
+import { OdczytyLicznika } from './OdczytyLicznika'
 import { TabelaTras } from './TabelaTras'
 import { Button } from './ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog'
@@ -76,16 +79,59 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
 
   useEffect(() => { void wczytaj() }, [wczytaj])
 
-  const zablokowana = ewidencja?.status === 'zaakceptowana'
+  const zaakceptowana = ewidencja?.status === 'zaakceptowana'
+  const admin = profil.administrator
+  /** Czy tabela jest tylko do odczytu.
+   *
+   *  Akceptacja zamyka ewidencje dla kierownika i ksiegowosci - to podpisany dokument.
+   *  Administrator moze ja poprawic mimo tego (zyczenie klienta 2026-11-03): czasem blad
+   *  wychodzi dopiero po zatwierdzeniu, a odblokowanie kasuje podpis akceptacji i kaze
+   *  ksiegowosci podpisywac sie drugi raz pod czyms, co juz zatwierdzila. Po takiej
+   *  poprawce trzeba odswiezyc archiwalny PDF - przycisk jest na gorze strony. */
+  const zablokowana = zaakceptowana && !admin
 
-  async function zapiszKomorke(tripId: string, pole: PoleEdytowalne, wartosc: string) {
-    const { error } = await supabase.from('trips').update({ [pole]: wartosc }).eq('id', tripId)
+  async function zapiszKomorke(tripId: string, pole: PoleTabeli, wartosc: string) {
+    // Kolumny GPS trafiaja do kolumn liczbowych i datowych, wiec musza byc sprawdzone
+    // PRZED zapisem - inaczej baza odrzuca cala poprawke komunikatem o skladni, ktory
+    // nic nie mowi osobie przy klawiaturze.
+    let doZapisu: string | number = wartosc
+    if (pole === 'km') {
+      const tekst = wartosc.trim().replace(',', '.')
+      const liczba = Number(tekst)
+      if (tekst === '' || !Number.isFinite(liczba)) {
+        setBlad('Liczba kilometrów musi być liczbą, np. 12,4. Pole zostało bez zmian.')
+        return
+      }
+      doZapisu = liczba
+    }
+    if (pole === 'data_wyjazdu') {
+      if (!/^\d{4}-\d{2}-\d{2}$/.test(wartosc.trim())) {
+        setBlad('Data wyjazdu musi być poprawną datą. Pole zostało bez zmian.')
+        return
+      }
+      doZapisu = wartosc.trim()
+    }
+
+    const { error } = await supabase.from('trips').update({ [pole]: doZapisu }).eq('id', tripId)
     if (error) { setBlad(error.message); return }
-    setTrasy((p) => p.map((t) => (t.id === tripId ? { ...t, [pole]: wartosc } : t)))
+    setBlad(null)
+    setTrasy((p) => p.map((t) => (t.id === tripId ? { ...t, [pole]: doZapisu } : t)))
 
     if (ewidencja?.status === 'wygenerowana') {
       await supabase.from('monthly_logs').update({ status: 'w_edycji' }).eq('id', logId)
       setEwidencja((e) => (e ? { ...e, status: 'w_edycji' } : e))
+    }
+
+    // Poprawka kilometrow albo daty zmienia sume miesiaca, a przez to stan licznika
+    // we WSZYSTKICH kolejnych miesiacach tego pojazdu. Bez przeliczenia nastepna
+    // ewidencja startowalaby od nieaktualnego stanu, a roznica stanow nie zgadzalaby sie
+    // z suma kilometrow w dokumencie.
+    if (jestPolemGPS(pole) && ewidencja) {
+      const { error: bladPrzeliczenia } = await supabase.rpc('przelicz_licznik', {
+        p_vehicle_id: ewidencja.vehicle_id,
+      })
+      if (bladPrzeliczenia) setBlad(bladPrzeliczenia.message)
+      await wczytaj()
     }
   }
 
@@ -326,10 +372,11 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
 
   const kierownik = profil.rola === 'kierownik'
   const ksiegowosc = profil.rola === 'ksiegowosc'
-  const mozeWyslac = kierownik && !zablokowana && ewidencja.status !== 'wyslana_do_akceptacji'
-  // Księgowość może zatwierdzić albo odesłać na każdym etapie poza już zablokowanym -
-  // także po odblokowaniu i ponownej edycji.
-  const ksiegowoscMozeDzialac = ksiegowosc && !zablokowana
+  const mozeWyslac = kierownik && !zaakceptowana && ewidencja.status !== 'wyslana_do_akceptacji'
+  // Księgowość może zatwierdzić albo odesłać na każdym etapie poza już zaakceptowanym -
+  // także po odblokowaniu i ponownej edycji. Dla administratora tabela jest edytowalna
+  // również po akceptacji, ale zatwierdzać drugi raz nie ma czego.
+  const ksiegowoscMozeDzialac = ksiegowosc && !zaakceptowana
   const licznikWyliczony = (ewidencja.stan_licznika_poczatek ?? 0) + sumaKm(trasy)
   const roznicaLicznika = roznicaZLicznikiem(licznikRzeczywisty, licznikWyliczony)
   const licznikRozjechany =
@@ -344,14 +391,27 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
       {/* Na gorze strony, nie na dole: ksiegowosc otwiera zablokowana ewidencje wlasnie po
           to, zeby ja odblokowac albo odswiezyc plik, a przy kilkuset wierszach tabeli
           przyciski na koncu strony sa praktycznie nie do znalezienia. */}
-      {ksiegowosc && zablokowana && (
+      {ksiegowosc && zaakceptowana && (
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 p-4">
           <p className="max-w-3xl text-sm text-amber-900">
-            <span className="font-semibold">Ewidencja jest zaakceptowana i zablokowana.</span>{' '}
-            Odblokowanie cofa ją do edycji i usuwa podpis akceptacji - po poprawkach trzeba
-            zatwierdzić ją ponownie. „Odśwież PDF” buduje plik archiwalny na nowo z bieżących
-            danych, nie ruszając statusu ani podpisów - do użycia, gdy dane poprawiono już
-            po akceptacji.
+            <span className="font-semibold">
+              Ewidencja jest zaakceptowana{admin ? '' : ' i zablokowana'}.
+            </span>{' '}
+            {admin ? (
+              <>
+                Jako administrator możesz poprawić w niej wszystkie pozycje, nie ruszając
+                statusu ani podpisów - również datę wyjazdu i kilometry z GPS. Po poprawkach
+                użyj „Odśwież PDF”, żeby archiwalny plik zgadzał się z danymi; bez tego
+                podpisany dokument zostanie w starej wersji.
+              </>
+            ) : (
+              <>
+                Odblokowanie cofa ją do edycji i usuwa podpis akceptacji - po poprawkach trzeba
+                zatwierdzić ją ponownie. „Odśwież PDF” buduje plik archiwalny na nowo z bieżących
+                danych, nie ruszając statusu ani podpisów - do użycia, gdy dane poprawiono już
+                po akceptacji.
+              </>
+            )}
           </p>
           <div className="flex gap-3">
             <Button wariant="zwykly" disabled={zajety} onClick={odswiezPdf}>
@@ -363,6 +423,16 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
           </div>
         </div>
       )}
+
+      {/* Odczyt licznika na gorze strony, bo kierownik wchodzi tu takze tylko po to,
+          zeby go wpisac - a przy kilkuset wierszach tabeli wszystko ponizej jest
+          praktycznie nie do znalezienia. */}
+      <OdczytyLicznika
+        vehicleId={ewidencja.vehicle_id}
+        nrRejestracyjny={ewidencja.vehicles.nr_rejestracyjny}
+        profil={profil}
+        poZmianie={wczytaj}
+      />
 
       <div className="rounded-lg border border-slate-200 bg-white p-5">
         <div className="flex flex-wrap items-start justify-between gap-4">
@@ -500,13 +570,41 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
         </div>
       )}
 
+      {/* Ksiegowosc moze poprawic pozycje sama, zamiast odsylac cala ewidencje do
+          kierownika. Baza pozwalala na to od poczatku (blokuje tylko status
+          'zaakceptowana'), ale nic tego nie mowilo, wiec jedyna widoczna droga bylo
+          "Odeslij do poprawki" - i miesiac czekania na jedna literowke. */}
+      {ksiegowosc && !zaakceptowana && (
+        <p className="rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm text-slate-700">
+          <span className="font-medium">Możesz poprawiać pozycje bezpośrednio w tabeli</span>
+          {ewidencja.status === 'wyslana_do_akceptacji'
+            ? ' - także teraz, gdy ewidencja jest wysłana do akceptacji.'
+            : '.'}{' '}
+          Odsyłanie do poprawki ma sens, gdy czegoś nie wiesz i musi to uzupełnić kierownik;
+          literówkę albo brakującą nazwę kontrahenta szybciej poprawić samemu.
+        </p>
+      )}
+
+      {admin && (
+        <p className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900">
+          <span className="font-medium">Uprawnienia administratora.</span> Masz edycję
+          wszystkich kolumn na każdym etapie - również <strong>daty wyjazdu</strong> i{' '}
+          <strong>liczby kilometrów</strong>, które dla pozostałych są dowodem z GPS
+          (obwódka bursztynowa). Zmiana kilometrów przelicza stany licznika we wszystkich
+          kolejnych miesiącach tego pojazdu, a każda poprawka trafia do dziennika zmian
+          na dole strony.
+        </p>
+      )}
+
       <div className="rounded-lg border border-slate-200 bg-white p-4">
         <TabelaTras
           trasy={trasy}
           zablokowana={zablokowana}
+          administrator={admin}
           zapisz={zapiszKomorke}
           // Po akceptacji ewidencja jest dokumentem, a nie lista uwag - kolory znikaja.
-          oznaczenia={zablokowana ? [] : oznaczenia}
+          // Takze dla administratora, ktory moze ja wtedy edytowac.
+          oznaczenia={zaakceptowana ? [] : oznaczenia}
           trybOznaczania={trybOznaczania}
           przelaczOznaczenie={przelaczOznaczenie}
         />

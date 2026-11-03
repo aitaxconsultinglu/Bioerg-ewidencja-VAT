@@ -24,6 +24,7 @@ function Sekcja({ tytul, children }: { tytul: string; children: React.ReactNode 
 
 export function JakToDziala({ profil, naListe }: Props) {
   const ksiegowosc = profil.rola === 'ksiegowosc'
+  const admin = profil.administrator
 
   return (
     <div className="space-y-5">
@@ -74,6 +75,26 @@ export function JakToDziala({ profil, naListe }: Props) {
           <span className="rounded bg-green-50 px-1.5 py-0.5 font-medium text-green-800">zielona</span>,
           gdy jej treść faktycznie się zmieni. Kolory nie trafiają na wydruk ani do Excela
           i znikają po zatwierdzeniu ewidencji.
+        </p>
+      </Sekcja>
+
+      <Sekcja tytul="Odczyt licznika i korekty">
+        <p>
+          Na górze każdej ewidencji jest miejsce na <strong>prawdziwy stan licznika</strong>{' '}
+          odczytany z deski rozdzielczej, razem z dniem odczytu. Nie trzeba czekać na koniec
+          miesiąca - odczyt można wpisać kiedykolwiek, choćby przy wymianie opon.
+        </p>
+        <p>
+          Aplikacja porówna go z kilometrami naliczonymi z GPS do tego dnia. Jeśli się
+          rozjeżdżają o co najmniej kilometr, dopisuje w ewidencji{' '}
+          <strong>pozycję korekcyjną</strong> na dzień odczytu - wyróżnioną na niebiesko -
+          żeby stan licznika w dokumencie zgadzał się z pojazdem. Korekta ma kilometry, więc
+          wchodzi do sumy „Razem”.
+        </p>
+        <p>
+          Odczytu z miesiąca, którego danych GPS jeszcze nie ma, nic nie traci: zostaje
+          zapisany, a korekta naliczy się sama po wgraniu danych. Pozycji korekcyjnej nie
+          edytuje się w tabeli - zmienia się ją, poprawiając albo usuwając sam odczyt.
         </p>
       </Sekcja>
 
@@ -148,7 +169,32 @@ export function JakToDziala({ profil, naListe }: Props) {
               rusza statusu ani podpisów.
             </li>
             <li>Zakładać i usuwać konta oraz podejrzeć historię wysłanych maili.</li>
+            <li>
+              Poprawiać pozycje <strong>bezpośrednio w tabeli</strong>, także gdy ewidencja
+              jest już wysłana do akceptacji. Odsyłanie do poprawki ma sens, gdy czegoś nie
+              wiadomo i musi to uzupełnić kierownik - literówkę szybciej poprawić samemu.
+            </li>
+            <li>Usuwać odczyty licznika razem z korektami, które z nich wynikły.</li>
           </ul>
+        </Sekcja>
+      )}
+
+      {admin && (
+        <Sekcja tytul="Uprawnienia administratora">
+          <p>
+            Konto administratora edytuje <strong>wszystkie kolumny na każdym etapie</strong>,
+            również w ewidencji zaakceptowanej i również te pochodzące z GPS - datę wyjazdu
+            i liczbę kilometrów. Komórki edytowalne tylko dla administratora mają bursztynową
+            obwódkę.
+          </p>
+          <p>
+            Dwie rzeczy dzieją się przy tym automatycznie: zmiana kilometrów{' '}
+            <strong>przelicza stany licznika</strong> we wszystkich kolejnych miesiącach tego
+            pojazdu, a każda poprawka trafia do dziennika zmian. Jedna rzecz nie dzieje się
+            sama - po poprawce w ewidencji zaakceptowanej trzeba użyć{' '}
+            <strong>„Odśwież PDF”</strong>, bo archiwalny plik powstał w chwili akceptacji
+            i inaczej zostanie w starej wersji.
+          </p>
         </Sekcja>
       )}
 

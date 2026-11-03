@@ -26,7 +26,7 @@ export default function App() {
   const wczytajProfil = useCallback(async (userId: string) => {
     const { data } = await supabase
       .from('profiles')
-      .select('id, email, imie_nazwisko, rola, wymaga_zmiany_hasla')
+      .select('id, email, imie_nazwisko, rola, wymaga_zmiany_hasla, administrator')
       .eq('id', userId)
       .maybeSingle()
     setProfil(data as Profil | null)
@@ -118,7 +118,9 @@ export default function App() {
             <div className="text-right">
               <p className="text-sm font-medium leading-tight">{profil.imie_nazwisko}</p>
               <p className="text-xs text-slate-500">
-                {profil.rola === 'ksiegowosc' ? 'księgowość' : 'kierownik'}
+                {profil.administrator
+                  ? 'administrator'
+                  : profil.rola === 'ksiegowosc' ? 'księgowość' : 'kierownik'}
               </p>
             </div>
             {/* Kompaktowe i bez zawijania: przy pieciu przyciskach domyslny rozmiar

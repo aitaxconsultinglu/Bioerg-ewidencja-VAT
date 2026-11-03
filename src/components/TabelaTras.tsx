@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { OznaczeniePola, PoleEdytowalne, Trasa } from '@/lib/types'
+import type { OznaczeniePola, PoleEdytowalne, PoleTabeli, Trasa } from '@/lib/types'
 import {
   OSTRZEZENIE_OGOLNY_CEL, celDoUzupelnienia, celZbytOgolny, dataPL, formatujKm, km, sumaKm,
 } from '@/lib/format'
@@ -8,7 +8,10 @@ import { cn } from '@/lib/utils'
 interface Props {
   trasy: Trasa[]
   zablokowana: boolean
-  zapisz: (tripId: string, pole: PoleEdytowalne, wartosc: string) => Promise<void>
+  zapisz: (tripId: string, pole: PoleTabeli, wartosc: string) => Promise<void>
+  /** Administrator poprawia WSZYSTKO, takze date wyjazdu i kilometry z GPS. Dla
+   *  pozostalych te dwie kolumny sa dowodem przebiegu i zostaja tylko do odczytu. */
+  administrator?: boolean
   /** Pola wskazane przez księgowość do poprawy. Pusta tablica, gdy nic nie wskazano. */
   oznaczenia?: OznaczeniePola[]
   /** Księgowość włączyła wskazywanie pól - kliknięcie komórki zaznacza ją do poprawy
@@ -18,18 +21,18 @@ interface Props {
 }
 
 interface Zakres {
-  pole: PoleEdytowalne
+  pole: PoleTabeli
   od: number
   do_: number
 }
 
 export function TabelaTras({
-  trasy, zablokowana, zapisz,
+  trasy, zablokowana, zapisz, administrator = false,
   oznaczenia = [], trybOznaczania = false, przelaczOznaczenie,
 }: Props) {
-  const [aktywna, setAktywna] = useState<{ wiersz: number; pole: PoleEdytowalne } | null>(null)
+  const [aktywna, setAktywna] = useState<{ wiersz: number; pole: PoleTabeli } | null>(null)
   const [zakres, setZakres] = useState<Zakres | null>(null)
-  const [edytowana, setEdytowana] = useState<{ wiersz: number; pole: PoleEdytowalne } | null>(null)
+  const [edytowana, setEdytowana] = useState<{ wiersz: number; pole: PoleTabeli } | null>(null)
   const [projekt, setProjekt] = useState('')
   const przeciaganie = useRef(false)
   const inputRef = useRef<HTMLInputElement>(null)
@@ -65,14 +68,17 @@ export function TabelaTras({
     setZakres(null)
   }
 
-  function zaznaczona(wiersz: number, pole: PoleEdytowalne) {
+  function zaznaczona(wiersz: number, pole: PoleTabeli) {
     if (aktywna?.wiersz === wiersz && aktywna.pole === pole) return true
     if (!zakres || zakres.pole !== pole) return false
     return wiersz >= Math.min(zakres.od, zakres.do_) && wiersz <= Math.max(zakres.od, zakres.do_)
   }
 
-  function rozpocznijEdycje(wiersz: number, pole: PoleEdytowalne) {
+  function rozpocznijEdycje(wiersz: number, pole: PoleTabeli) {
     if (zablokowana) return
+    // Pozycja korekcyjna wynika z odczytu licznika - zmiana jej tresci wprost rozjechalaby
+    // ja z odczytem, z ktorego powstala. Poprawia sie ja przez poprawienie odczytu.
+    if (trasy[wiersz].korekta) return
     setEdytowana({ wiersz, pole })
     setProjekt(String(trasy[wiersz][pole] ?? ''))
   }
@@ -90,15 +96,18 @@ export function TabelaTras({
     const wEdycji = edytowana?.wiersz === wiersz && edytowana.pole === pole
     const wZaznaczeniu = zaznaczona(wiersz, pole)
     const wartosc = String(trasa[pole] ?? '')
+    // Pozycja korekcyjna nie jest do uzupelniania ani do wskazywania ksiegowosci:
+    // jej tresc wynika z odczytu licznika i poprawia sie ja poprawiajac odczyt.
+    const korekta = trasa.korekta === true
     // Brak nazwiska kierowcy to zwykla luka do wypelnienia - bursztynowa.
-    const brakKierowcy = pole === 'kierowca' && wartosc.trim() === ''
+    const brakKierowcy = !korekta && pole === 'kierowca' && wartosc.trim() === ''
     // Cel pusty ALBO tak ogolny, ze nic nie mowi - jedno i drugie na czerwono. Klient
     // poprosil 2026-10-22, zeby puste cele pod nierozpoznanymi adresami tez swiecily:
     // kierownik ma tam dopisac i cel, i nazwe firmy, a bursztyn czytano jako "to moze
     // zostac". Zapis w rodzaju "prace remontowe" jest o tyle gorszy od pustego, ze
     // wyglada na wypelniony i wlasnie dlatego przechodzi bez zastanowienia.
-    const celPusty = pole === 'cel_wyjazdu' && celDoUzupelnienia(wartosc)
-    const celOgolny = pole === 'cel_wyjazdu' && celZbytOgolny(wartosc)
+    const celPusty = !korekta && pole === 'cel_wyjazdu' && celDoUzupelnienia(wartosc)
+    const celOgolny = !korekta && pole === 'cel_wyjazdu' && celZbytOgolny(wartosc)
 
     // Pole wskazane przez ksiegowosc. Czerwone, dopoki wartosc sie nie zmieni; zielone,
     // gdy kierownik ja poprawil - patrz OznaczeniePola w types.ts.
@@ -121,8 +130,9 @@ export function TabelaTras({
         title={podpowiedz}
         className={cn(
           'komorka relative',
-          !zablokowana && !trybOznaczania && 'komorka-edytowalna',
-          trybOznaczania && 'cursor-pointer',
+          !zablokowana && !trybOznaczania && !korekta && 'komorka-edytowalna',
+          korekta && 'italic text-slate-600',
+          trybOznaczania && !korekta && 'cursor-pointer',
           wZaznaczeniu && 'ring-2 ring-inset ring-blekit-ciemny',
           brakKierowcy && 'bg-amber-50',
           (celPusty || celOgolny) && 'bg-red-50',
@@ -131,6 +141,7 @@ export function TabelaTras({
           poprawione && 'bg-green-50 ring-2 ring-inset ring-green-400',
         )}
         onMouseDown={(e) => {
+          if (korekta) return
           if (trybOznaczania) {
             e.preventDefault()
             przelaczOznaczenie?.(trasa, pole)
@@ -181,7 +192,7 @@ export function TabelaTras({
           </span>
         )}
 
-        {!zablokowana && !trybOznaczania && !wEdycji
+        {!zablokowana && !trybOznaczania && !wEdycji && !korekta
           && aktywna?.wiersz === wiersz && aktywna.pole === pole && (
           <span
             title="Przeciągnij w dół, aby skopiować wartość"
@@ -198,11 +209,66 @@ export function TabelaTras({
     )
   }
 
+  /** Kolumna z danymi GPS: data wyjazdu albo liczba kilometrow.
+   *
+   *  Dla kierownika i ksiegowosci to dowod przebiegu i zostaje tylko do odczytu - tak
+   *  jak opisuje to naglowek tabeli. Administrator moze ja poprawic, bo urzadzenie GPS
+   *  czasem notuje trase, ktorej nie bylo, albo gubi kilometry, a bez tej mozliwosci
+   *  jedynym wyjsciem byla reczna poprawka w bazie. Kazda taka zmiana trafia do dziennika
+   *  zmian (trigger audytuj_trips), wiec widac kto, kiedy i z czego na co ja zmienil. */
+  function komorkaGPS(wiersz: number, pole: 'data_wyjazdu' | 'km') {
+    const trasa = trasy[wiersz]
+    const wEdycji = edytowana?.wiersz === wiersz && edytowana.pole === pole
+    const edytowalna = administrator && !zablokowana && !trybOznaczania && !trasa.korekta
+    const tresc = pole === 'km' ? km(trasa.km) : dataPL(trasa.data_wyjazdu)
+
+    if (wEdycji) {
+      return (
+        <td className={cn('komorka relative', pole === 'km' ? 'text-right' : 'text-center')}>
+          <input
+            ref={inputRef}
+            value={projekt}
+            onChange={(e) => setProjekt(e.target.value)}
+            onBlur={zatwierdz}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') void zatwierdz()
+              if (e.key === 'Escape') setEdytowana(null)
+            }}
+            type={pole === 'data_wyjazdu' ? 'date' : 'text'}
+            inputMode={pole === 'km' ? 'decimal' : undefined}
+            className="w-full select-text bg-white text-sm tabular-nums outline-none"
+          />
+        </td>
+      )
+    }
+
+    return (
+      <td
+        title={edytowalna
+          ? 'Dane z GPS. Jako administrator mozesz je poprawic - zmiana trafi do dziennika zmian.'
+          : pole === 'km'
+            ? 'Liczba kilometrow pochodzi z danych GPS i nie podlega edycji'
+            : 'Data pochodzi z danych GPS i nie podlega edycji'}
+        className={cn(
+          'komorka whitespace-nowrap',
+          pole === 'km' ? 'text-right tabular-nums' : 'text-center',
+          edytowalna ? 'komorka-edytowalna ring-1 ring-inset ring-amber-200' : 'komorka-tylko-odczyt',
+        )}
+        onDoubleClick={() => { if (edytowalna) rozpocznijEdycje(wiersz, pole) }}
+      >
+        {tresc}
+      </td>
+    )
+  }
+
   // Liczone przy kazdym renderze, ale to kilkaset wierszy i jedno porownanie tekstu -
   // taniej niz pilnowanie, kiedy uniewaznic zapamietany wynik.
+  // Pozycje korekcyjne maja z gory ustalony, konkretny cel i nie sa do uzupelnienia
+  // przez kierownika - nie moga podbijac licznika braków.
   const zbytOgolne = trasy.filter(
-    (t) => celZbytOgolny(t.cel_wyjazdu) || celDoUzupelnienia(t.cel_wyjazdu),
+    (t) => !t.korekta && (celZbytOgolny(t.cel_wyjazdu) || celDoUzupelnienia(t.cel_wyjazdu)),
   ).length
+  const ileKorekt = trasy.filter((t) => t.korekta).length
   const wartosciTras = new Map(trasy.map((t) => [t.id, t]))
   const doPoprawy = oznaczenia.filter((o) => {
     const t = wartosciTras.get(o.trip_id)
@@ -236,6 +302,19 @@ export function TabelaTras({
         <p className="mb-2 text-xs text-slate-500">
           Kliknij komórkę, aby ją zaznaczyć, kliknij dwukrotnie, aby edytować. Niebieski
           kwadrat w rogu zaznaczenia przeciągnij w dół, aby skopiować wartość na kolejne wiersze.
+        </p>
+      )}
+
+      {ileKorekt > 0 && (
+        <p className="mb-2 rounded border border-blekit bg-blekit-jasny px-3 py-2 text-xs text-slate-700">
+          <span className="font-semibold">
+            {ileKorekt === 1
+              ? 'Jedna pozycja to korekta stanu licznika'
+              : `Pozycji korekcyjnych stanu licznika: ${ileKorekt}`}
+          </span>{' '}
+          (wyróżnione na niebiesko). Powstały z odczytu licznika wpisanego u góry strony
+          i wyrównują ewidencję do faktycznego przebiegu pojazdu. Nie da się ich edytować
+          w tabeli - zmienia się je, poprawiając albo usuwając sam odczyt.
         </p>
       )}
 
@@ -275,23 +354,13 @@ export function TabelaTras({
           </thead>
           <tbody>
             {trasy.map((t, i) => (
-              <tr key={t.id}>
+              <tr key={t.id} className={cn(t.korekta && 'bg-blekit-jasny/60')}>
                 <td className="komorka komorka-tylko-odczyt text-center">{t.lp}</td>
-                <td
-                  title="Data pochodzi z danych GPS i nie podlega edycji"
-                  className="komorka komorka-tylko-odczyt whitespace-nowrap text-center"
-                >
-                  {dataPL(t.data_wyjazdu)}
-                </td>
+                {komorkaGPS(i, 'data_wyjazdu')}
                 {komorkaEdytowalna(i, 'cel_wyjazdu')}
                 {komorkaEdytowalna(i, 'skad')}
                 {komorkaEdytowalna(i, 'dokad')}
-                <td
-                  title="Liczba kilometrów pochodzi z danych GPS i nie podlega edycji"
-                  className="komorka komorka-tylko-odczyt text-right tabular-nums"
-                >
-                  {km(t.km)}
-                </td>
+                {komorkaGPS(i, 'km')}
                 {komorkaEdytowalna(i, 'kierowca')}
               </tr>
             ))}
