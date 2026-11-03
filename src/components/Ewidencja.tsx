@@ -430,6 +430,8 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
       <OdczytyLicznika
         vehicleId={ewidencja.vehicle_id}
         nrRejestracyjny={ewidencja.vehicles.nr_rejestracyjny}
+        rok={ewidencja.rok}
+        miesiac={ewidencja.miesiac}
         profil={profil}
         poZmianie={wczytaj}
       />

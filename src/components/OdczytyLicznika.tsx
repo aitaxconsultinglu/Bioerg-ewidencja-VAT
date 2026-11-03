@@ -1,13 +1,16 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import type { OdczytLicznika, Profil, WynikOdczytu } from '@/lib/types'
-import { dataPL, formatujKm, licznik } from '@/lib/format'
+import { MIESIACE_PL, dataPL, formatujKm, licznik } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { Button } from './ui/button'
 
 interface Props {
   vehicleId: string
   nrRejestracyjny: string
+  /** Okres ewidencji, w której panel jest osadzony - wyznacza domyślną datę odczytu. */
+  rok: number
+  miesiac: number
   profil: Profil
   /** Wywoływane po każdej zmianie, która mogła ruszyć trasy albo stany licznika -
    *  widok ewidencji musi się wtedy przeładować. */
@@ -23,6 +26,30 @@ function dzisiajPL() {
   return new Intl.DateTimeFormat('en-CA', {
     timeZone: 'Europe/Warsaw', year: 'numeric', month: '2-digit', day: '2-digit',
   }).format(new Date())
+}
+
+/** Nazwa miesiąca małą literą - do wplecenia w zdanie. MIESIACE_PL są z wielkiej. */
+function nazwaMiesiaca(miesiac: number) {
+  return (MIESIACE_PL[miesiac - 1] ?? String(miesiac)).toLocaleLowerCase('pl')
+}
+
+function ostatniDzienMiesiaca(rok: number, miesiac: number) {
+  const d = new Date(Date.UTC(rok, miesiac, 0))
+  return d.toISOString().slice(0, 10)
+}
+
+/** Domyślna data odczytu: ostatni dzień miesiąca TEJ ewidencji, nie dzisiaj.
+ *
+ *  DLACZEGO. Korekta trafia do ewidencji za miesiąc, z którego pochodzi DATA odczytu.
+ *  Kierownik zamykający październik odczytuje licznik 2 listopada i naturalnie wpisuje
+ *  2 listopada - a wtedy korekta ląduje w listopadzie, którego ewidencji jeszcze nie ma,
+ *  październik zostaje nietknięty i wysyłka do akceptacji nadal jest zablokowana.
+ *  Dokładnie to zgłosił kierownik 3.11.2026. Podpowiadamy więc koniec miesiąca ewidencji,
+ *  a gdy ten miesiąc jeszcze trwa - dzisiaj, bo przyszłej daty baza nie przyjmie. */
+function domyslnaData(rok: number, miesiac: number) {
+  const koniec = ostatniDzienMiesiaca(rok, miesiac)
+  const dzis = dzisiajPL()
+  return koniec < dzis ? koniec : dzis
 }
 
 const OPIS_WYNIKU: Record<WynikOdczytu, { tekst: string; klasa: string }> = {
@@ -55,9 +82,11 @@ const OPIS_WYNIKU: Record<WynikOdczytu, { tekst: string; klasa: string }> = {
  *  roboty: druga połowa to naliczenie pozycji korekcyjnej i przeliczenie stanów licznika
  *  w kolejnych miesiącach. Tabela nie ma polityki INSERT właśnie dlatego, żeby nie dało
  *  się zapisać odczytu bez tych dwóch kroków. */
-export function OdczytyLicznika({ vehicleId, nrRejestracyjny, profil, poZmianie }: Props) {
+export function OdczytyLicznika({
+  vehicleId, nrRejestracyjny, rok, miesiac, profil, poZmianie,
+}: Props) {
   const [odczyty, setOdczyty] = useState<OdczytLicznika[]>([])
-  const [data, setData] = useState(dzisiajPL())
+  const [data, setData] = useState(() => domyslnaData(rok, miesiac))
   const [stan, setStan] = useState('')
   const [uwaga, setUwaga] = useState('')
   const [zajety, setZajety] = useState(false)
@@ -140,6 +169,12 @@ export function OdczytyLicznika({ vehicleId, nrRejestracyjny, profil, poZmianie 
 
   const ksiegowosc = profil.rola === 'ksiegowosc'
   const ostatni = odczyty[0]
+  // Korekta trafia do ewidencji za miesiąc z DATY odczytu. Gdy data wypada poza
+  // miesiącem tej ewidencji, mówimy o tym OD RAZU - inaczej kierownik zapisuje odczyt,
+  // nic się nie zmienia i nie wie dlaczego.
+  const innyMiesiac = data !== '' && (
+    Number(data.slice(0, 4)) !== rok || Number(data.slice(5, 7)) !== miesiac
+  )
 
   return (
     // Panel neutralny, nie w kolorach marki: te sa zarezerwowane na akcenty, a nie na
@@ -195,6 +230,23 @@ export function OdczytyLicznika({ vehicleId, nrRejestracyjny, profil, poZmianie 
         się rozjeżdżają, dopisze w ewidencji pozycję korekcyjną na ten dzień, żeby licznik
         w dokumencie zgadzał się z pojazdem.
       </p>
+
+      {innyMiesiac && (
+        <p className="mt-2 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900 ring-1 ring-amber-300">
+          <span className="font-medium">Uwaga: ta data jest spoza okresu tej ewidencji.</span>{' '}
+          Korekta trafi do ewidencji za {nazwaMiesiaca(Number(data.slice(5, 7)))}{' '}
+          {data.slice(0, 4)}, a nie do {nazwaMiesiaca(miesiac)} {rok} - a jeśli tamtej
+          ewidencji jeszcze nie ma, odczyt poczeka na dane GPS i w tym miesiącu nic się nie
+          zmieni. Zamykasz {nazwaMiesiaca(miesiac)}? Wpisz stan licznika{' '}
+          <button
+            type="button"
+            className="underline"
+            onClick={() => setData(domyslnaData(rok, miesiac))}
+          >
+            na {dataPL(ostatniDzienMiesiaca(rok, miesiac))}
+          </button>.
+        </p>
+      )}
 
       {blad && (
         <p className="mt-2 rounded-md bg-red-50 px-3 py-2 text-sm text-red-700">{blad}</p>
