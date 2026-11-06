@@ -13,7 +13,7 @@ import {
 import { cn } from '@/lib/utils'
 import { nazwaPliku, pobierzExcel, pobierzPdf, zbudujPdf } from '@/lib/eksport'
 import { TOLERANCJA_LICZNIKA_KM } from '@/lib/config'
-import { OdczytyLicznika } from './OdczytyLicznika'
+import { OdczytyLicznika, PodsumowanieOdczytow } from './OdczytyLicznika'
 import { TabelaTras } from './TabelaTras'
 import { Button } from './ui/button'
 import { Dialog, DialogContent, DialogDescription, DialogTitle } from './ui/dialog'
@@ -611,6 +611,12 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
           przelaczOznaczenie={przelaczOznaczenie}
         />
       </div>
+
+      {/* Potwierdzenie wpisanych odczytow TUZ POD TABELA: kierownik konczy prace na dole
+          strony i stamtad nie widzi panelu z gory, wiec nie ma zadnego sygnalu, ze jego
+          odczyt sie zapisal. Roznicy wzgledem ewidencji tu nie ma - patrz
+          PodsumowanieOdczytow. */}
+      <PodsumowanieOdczytow vehicleId={ewidencja.vehicle_id} />
 
       {(mozeWyslac || ksiegowoscMozeDzialac) && (
       <div className="flex flex-wrap items-end justify-between gap-4 rounded-lg border border-slate-200 bg-white p-4">
