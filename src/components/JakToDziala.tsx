@@ -25,6 +25,7 @@ function Sekcja({ tytul, children }: { tytul: string; children: React.ReactNode 
 export function JakToDziala({ profil, naListe }: Props) {
   const ksiegowosc = profil.rola === 'ksiegowosc'
   const admin = profil.administrator
+  const tylkoKierownik = profil.rola === 'kierownik' && !profil.administrator
 
   return (
     <div className="space-y-5">
@@ -81,9 +82,14 @@ export function JakToDziala({ profil, naListe }: Props) {
       <Sekcja tytul="Odczyt licznika i korekty">
         <p>
           Na górze każdej ewidencji jest miejsce na <strong>prawdziwy stan licznika</strong>{' '}
-          odczytany z deski rozdzielczej, razem z dniem odczytu. Nie trzeba czekać na koniec
-          miesiąca - odczyt można wpisać kiedykolwiek, choćby przy wymianie opon.
+          odczytany z deski rozdzielczej, razem z dniem i godziną odczytu. Nie trzeba czekać
+          na koniec miesiąca - odczyt można wpisać kiedykolwiek, choćby przy wymianie opon.
+          Wpisane odczyty widać pod tabelą tras.
         </p>
+        {/* Dalej jest mechanika dokumentu: po co jest rodzaj odczytu, jak liczy sie
+            porownanie i co robi korekta. Kierownik ma wpisac liczbe z licznika i tyle
+            (decyzja klienta 6.11.2026); dokument prowadzi ksiegowosc. */}
+        {!tylkoKierownik && (<>
         <p>
           Odczyt ma <strong>rodzaj</strong>. <strong>Kontrolny</strong> tylko pokazuje, o ile
           ewidencja rozjeżdża się z licznikiem na ten moment - dokumentu nie rusza. Taki
@@ -107,6 +113,7 @@ export function JakToDziala({ profil, naListe }: Props) {
           zapisany, a korekta naliczy się sama po wgraniu danych. Pozycji korekcyjnej nie
           edytuje się w tabeli - zmienia się ją, poprawiając albo usuwając sam odczyt.
         </p>
+        </>)}
       </Sekcja>
 
       <Sekcja tytul="Droga ewidencji">

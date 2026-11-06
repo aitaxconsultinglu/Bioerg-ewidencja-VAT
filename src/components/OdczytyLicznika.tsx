@@ -182,6 +182,20 @@ export function OdczytyLicznika({
     wynik: WynikOdczytu; stan_wyliczony: number | null; korekta_km: number | null
   }) {
     const roznica = w.korekta_km === null ? null : Math.abs(w.korekta_km)
+
+    // Kierownik dostaje potwierdzenie, a nie wyklad o tym, jak dziala dokument.
+    if (prosty) {
+      switch (w.wynik) {
+        case 'zablokowany':
+          return 'Stan licznika zapisany. Ewidencja za ten miesiąc jest już zatwierdzona '
+               + '- zgłoś to księgowości.'
+        case 'skorygowany':
+          return 'Stan licznika zapisany. Ewidencja została dopasowana do licznika.'
+        default:
+          return 'Stan licznika zapisany.'
+      }
+    }
+
     switch (w.wynik) {
       case 'kontrolny':
         // Rozbieżność widzi wyłącznie administrator - patrz pokazujRoznice.
@@ -235,18 +249,24 @@ export function OdczytyLicznika({
    *  kontrola przestaje cokolwiek mierzyć i zostaje nam potwierdzenie własnych danych.
    *  Sam odczyt i jego zapis widzi normalnie, patrz PodsumowanieOdczytow. */
   const pokazujRoznice = profil.administrator === true
+  /** Kierownik widzi wersję podstawową: co ma wpisać, i potwierdzenie, że zapisał.
+   *
+   *  Bez wyjaśnień, jak liczy się porównanie, co robi korekta i po co jest cotygodniowa
+   *  kontrola - to mechanika dokumentu, nie jego praca (decyzja klienta 6.11.2026).
+   *  Księgowość i administrator prowadzą ten dokument, więc u nich zostaje pełny opis. */
+  const prosty = profil.rola === 'kierownik' && !profil.administrator
   const ostatni = odczyty[0]
   const zamykaMiesiac = rodzaj === 'koniec_miesiaca'
   // Data z ostatniego dnia miesiąca przy odczycie kontrolnym: najpewniej ktoś zamyka
   // miesiąc i nie zauważył pola rodzaju. Nie przestawiamy za niego - samo zamknięcie
   // dopisuje pozycję do dokumentu podatkowego i ma być świadome - ale pytamy wprost.
-  const moznaZamknac = !zamykaMiesiac && toKoniecMiesiaca(data)
+  const moznaZamknac = !zamykaMiesiac && toKoniecMiesiaca(data) && !prosty
   // Korekta trafia do ewidencji za miesiąc z DATY odczytu. Gdy data wypada poza
   // miesiącem tej ewidencji, mówimy o tym OD RAZU - inaczej kierownik zapisuje odczyt,
   // nic się nie zmienia i nie wie dlaczego.
   // Dotyczy to wyłącznie odczytu zamykającego miesiąc - kontrolny z definicji bywa
   // z dowolnego dnia i niczego nie przesuwa.
-  const innyMiesiac = zamykaMiesiac && data !== '' && (
+  const innyMiesiac = zamykaMiesiac && !prosty && data !== '' && (
     Number(data.slice(0, 4)) !== rok || Number(data.slice(5, 7)) !== miesiac
   )
 
@@ -319,8 +339,10 @@ export function OdczytyLicznika({
             onChange={(e) => setRodzaj(e.target.value as RodzajOdczytu)}
             className="mt-1 w-56 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:border-blekit focus:outline-none"
           >
-            <option value="kontrolny">Kontrolny (w trakcie miesiąca)</option>
-            <option value="koniec_miesiaca">Na koniec miesiąca (zamyka miesiąc)</option>
+            {/* Etykiety bez objaśnień mechaniki - kierownik ma wybrać, czy to zwykły
+                odczyt, czy stan na koniec miesiąca, a nie czytać, co się dzieje dalej. */}
+            <option value="kontrolny">Zwykły odczyt</option>
+            <option value="koniec_miesiaca">Stan na koniec miesiąca</option>
           </select>
         </div>
         <Button wariant="glowny" disabled={zajety} onClick={zapisz}>
@@ -329,7 +351,12 @@ export function OdczytyLicznika({
       </div>
 
       <p className="mt-2 text-xs text-slate-600">
-        Wpisz tu prawdziwy stan licznika {nrRejestracyjny}, kiedy go odczytasz.{' '}
+        Wpisz tu stan licznika {nrRejestracyjny} odczytany z deski rozdzielczej, razem
+        z dniem i godziną odczytu.
+      </p>
+
+      {!prosty && (
+      <p className="mt-2 text-xs text-slate-600">
         {zamykaMiesiac ? (
           <>
             <span className="font-medium">Odczyt na koniec miesiąca</span> zamyka miesiąc:
@@ -349,6 +376,7 @@ export function OdczytyLicznika({
         Podaj godzinę, jeśli po odczycie auto jeszcze tego dnia jeździło - bez niej
         porównanie obejmuje cały dzień razem z późniejszymi kursami.
       </p>
+      )}
 
       {innyMiesiac && (
         <p className="mt-2 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900 ring-1 ring-amber-300">
@@ -416,7 +444,7 @@ export function OdczytyLicznika({
                   <th className="py-1 pr-3">Licznik</th>
                   {pokazujRoznice && <th className="py-1 pr-3">Z ewidencji</th>}
                   {pokazujRoznice && <th className="py-1 pr-3">Różnica</th>}
-                  <th className="py-1 pr-3">Wynik</th>
+                  <th className="py-1 pr-3">{prosty ? 'Uwaga' : 'Wynik'}</th>
                   <th className="py-1 pr-3">Wpisał</th>
                   <th className="py-1" />
                 </tr>
@@ -442,13 +470,19 @@ export function OdczytyLicznika({
                       </td>
                     )}
                     <td className="py-1 pr-3">
-                      <span className={cn(
-                        'inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ring-1',
-                        OPIS_WYNIKU[o.wynik].klasa,
-                      )}>
-                        {OPIS_WYNIKU[o.wynik].tekst}
-                      </span>
-                      {o.uwaga && <span className="ml-2 text-slate-500">{o.uwaga}</span>}
+                      {/* Stan przetwarzania odczytu to mechanika dokumentu - kierownik
+                          widzi w tej kolumnie tylko własną uwagę. */}
+                      {!prosty && (
+                        <span className={cn(
+                          'inline-flex rounded-full px-2 py-0.5 text-[11px] font-medium ring-1',
+                          OPIS_WYNIKU[o.wynik].klasa,
+                        )}>
+                          {OPIS_WYNIKU[o.wynik].tekst}
+                        </span>
+                      )}
+                      {o.uwaga && (
+                        <span className={cn('text-slate-500', !prosty && 'ml-2')}>{o.uwaga}</span>
+                      )}
                     </td>
                     <td className="py-1 pr-3 text-slate-600">{o.wpisal_nazwa || '—'}</td>
                     <td className="py-1 text-right">
@@ -506,8 +540,7 @@ export function PodsumowanieOdczytow({ vehicleId }: { vehicleId: string }) {
     <div className="rounded-lg border border-slate-200 bg-white p-4">
       <h3 className="text-sm font-semibold text-slate-800">Zapisane stany licznika</h3>
       <p className="mt-1 text-xs text-slate-500">
-        Odczyty wpisane dla tego pojazdu. Kontrolny jest tylko zapisem stanu licznika
-        i niczego w ewidencji nie zmienia.
+        Odczyty wpisane dla tego pojazdu.
       </p>
       <ul className="mt-2 divide-y divide-slate-100 text-sm">
         {odczyty.map((o) => (
