@@ -66,6 +66,11 @@ export interface Trasa {
    *  edycji recznej: powstaje i znika razem z odczytem. */
   korekta?: boolean
   odczyt_id?: string | null
+  /** Godziny pierwszego i ostatniego odcinka wpisu wg GPS. Null dla danych sprzed
+   *  listopada 2026 i dla pozycji korekcyjnych. Sluza do porownania z odczytem
+   *  licznika podanym z godzina. */
+  godzina_od?: string | null
+  godzina_do?: string | null
 }
 
 /** Odczyt licznika z deski rozdzielczej, wpisywany przez kierownika w dowolnym dniu.
@@ -77,6 +82,9 @@ export interface OdczytLicznika {
   id: string
   vehicle_id: string
   data_odczytu: string
+  /** Godzina odczytu, 'HH:MM:SS'. Null = odczyt dotyczy calego dnia. */
+  godzina_odczytu: string | null
+  rodzaj: RodzajOdczytu
   stan: number
   uwaga: string | null
   wpisal_nazwa: string
@@ -89,7 +97,17 @@ export interface OdczytLicznika {
   utworzono: string
 }
 
-export type WynikOdczytu = 'zgodny' | 'skorygowany' | 'oczekuje' | 'zablokowany'
+export type WynikOdczytu =
+  | 'zgodny' | 'skorygowany' | 'oczekuje' | 'zablokowany' | 'kontrolny'
+
+/** Co odczyt robi z ewidencja.
+ *
+ *  'kontrolny' - tylko pomiar rozbieznosci, dokumentu nie rusza. Taki jest kazdy odczyt
+ *  w trakcie miesiaca, zeby cotygodniowa kontrola nie dopisywala czterech pozycji
+ *  korekcyjnych do jednego dokumentu VAT.
+ *  'koniec_miesiaca' - naklada pozycje korekcyjna i wpisuje stan licznika na koniec
+ *  miesiaca, czyli zamyka miesiac. */
+export type RodzajOdczytu = 'kontrolny' | 'koniec_miesiaca'
 
 export interface WpisAudytu {
   id: number

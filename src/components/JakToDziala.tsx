@@ -85,11 +85,22 @@ export function JakToDziala({ profil, naListe }: Props) {
           miesiąca - odczyt można wpisać kiedykolwiek, choćby przy wymianie opon.
         </p>
         <p>
-          Aplikacja porówna go z kilometrami naliczonymi z GPS do tego dnia. Jeśli się
-          rozjeżdżają o co najmniej kilometr, dopisuje w ewidencji{' '}
-          <strong>pozycję korekcyjną</strong> na dzień odczytu - wyróżnioną na niebiesko -
-          żeby stan licznika w dokumencie zgadzał się z pojazdem. Korekta ma kilometry, więc
-          wchodzi do sumy „Razem”.
+          Odczyt ma <strong>rodzaj</strong>. <strong>Kontrolny</strong> tylko pokazuje, o ile
+          ewidencja rozjeżdża się z licznikiem na ten moment - dokumentu nie rusza. Taki
+          wpisuje się w trakcie miesiąca, choćby co piątek: dzięki temu widać, w którym
+          tygodniu powstała rozbieżność, a w dokumencie nie przybywa pozycji.{' '}
+          <strong>Na koniec miesiąca</strong> zamyka miesiąc - jeśli odczyt i GPS rozjeżdżają
+          się o co najmniej kilometr, dopisuje w ewidencji <strong>pozycję korekcyjną</strong>{' '}
+          wyróżnioną na niebiesko, żeby stan licznika w dokumencie zgadzał się z pojazdem.
+          Korekta ma kilometry, więc wchodzi do sumy „Razem”, i bywa ujemna, gdy GPS naliczył
+          więcej, niż auto faktycznie przejechało.
+        </p>
+        <p>
+          Warto podać też <strong>godzinę odczytu</strong>. Bez niej porównanie obejmuje cały
+          dzień - razem z kursami wykonanymi już PO spisaniu licznika, co przy aucie
+          wracającym wieczorem do domu daje co tydzień ten sam, nieprawdziwy minus. Z godziną
+          liczą się tylko trasy zakończone do tej pory. Trasy sprzed listopada 2026 nie mają
+          w bazie godzin i liczą się całym dniem.
         </p>
         <p>
           Odczytu z miesiąca, którego danych GPS jeszcze nie ma, nic nie traci: zostaje

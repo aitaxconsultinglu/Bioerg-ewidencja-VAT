@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
-import type { OdczytLicznika, Profil, WynikOdczytu } from '@/lib/types'
+import type { OdczytLicznika, Profil, RodzajOdczytu, WynikOdczytu } from '@/lib/types'
 import { MIESIACE_PL, dataPL, formatujKm, licznik } from '@/lib/format'
 import { cn } from '@/lib/utils'
 import { Button } from './ui/button'
@@ -52,7 +52,31 @@ function domyslnaData(rok: number, miesiac: number) {
   return koniec < dzis ? koniec : dzis
 }
 
+/** Rodzaj odczytu wynikający z daty: ostatni dzień miesiąca zamyka miesiąc, każdy inny
+ *  dzień to odczyt kontrolny.
+ *
+ *  Kierownik i tak może to przestawić - podpowiedź ma tylko trafiać w najczęstszy
+ *  przypadek, żeby cotygodniowa kontrola nie wymagała za każdym razem klikania. */
+function rodzajZDaty(data: string): RodzajOdczytu {
+  if (data === '') return 'kontrolny'
+  const rok = Number(data.slice(0, 4))
+  const miesiac = Number(data.slice(5, 7))
+  return data === ostatniDzienMiesiaca(rok, miesiac) ? 'koniec_miesiaca' : 'kontrolny'
+}
+
+/** Bieżąca godzina w strefie polskiej, 'HH:MM' - do ograniczenia pola godziny, gdy
+ *  odczyt jest z dzisiaj. Baza odrzuca godzinę z przyszłości. */
+function terazPL() {
+  return new Intl.DateTimeFormat('pl-PL', {
+    timeZone: 'Europe/Warsaw', hour: '2-digit', minute: '2-digit', hour12: false,
+  }).format(new Date())
+}
+
 const OPIS_WYNIKU: Record<WynikOdczytu, { tekst: string; klasa: string }> = {
+  kontrolny: {
+    tekst: 'kontrolny - bez zmian w ewidencji',
+    klasa: 'bg-slate-100 text-slate-700 ring-slate-300',
+  },
   zgodny: {
     tekst: 'zgodny z ewidencją',
     klasa: 'bg-green-50 text-green-800 ring-green-300',
@@ -87,6 +111,8 @@ export function OdczytyLicznika({
 }: Props) {
   const [odczyty, setOdczyty] = useState<OdczytLicznika[]>([])
   const [data, setData] = useState(() => domyslnaData(rok, miesiac))
+  const [godzina, setGodzina] = useState('')
+  const [rodzaj, setRodzaj] = useState<RodzajOdczytu>(() => rodzajZDaty(domyslnaData(rok, miesiac)))
   const [stan, setStan] = useState('')
   const [uwaga, setUwaga] = useState('')
   const [zajety, setZajety] = useState(false)
@@ -103,6 +129,11 @@ export function OdczytyLicznika({
   }, [vehicleId])
 
   useEffect(() => { void wczytaj() }, [wczytaj])
+
+  // Zmiana dnia przestawia rodzaj na ten, który z tego dnia wynika. Świadomy wybór
+  // kierownika ginie przy zmianie daty - i dobrze: inaczej odczyt z 14 listopada
+  // zostałby z poprzedniego ustawienia „koniec miesiąca” i po cichu dopisał korektę.
+  useEffect(() => { setRodzaj(rodzajZDaty(data)) }, [data])
 
   async function zapisz() {
     const tekst = stan.trim().replace(',', '.')
@@ -122,12 +153,19 @@ export function OdczytyLicznika({
       p_data: data,
       p_stan: Number(tekst),
       p_uwaga: uwaga.trim() || null,
+      // Pusta godzina to null, nie '': brak godziny znaczy „odczyt dotyczy całego dnia”
+      // i tak właśnie liczy to baza.
+      p_godzina: godzina || null,
+      p_rodzaj: rodzaj,
     })
     setZajety(false)
     if (error) { setBlad(error.message); return }
 
-    const w = wynik as { wynik: WynikOdczytu; stan_wyliczony: number | null; korekta_km: number | null }
+    const w = wynik as {
+      wynik: WynikOdczytu; stan_wyliczony: number | null; korekta_km: number | null
+    }
     setStan('')
+    setGodzina('')
     setUwaga('')
     setKomunikat(opisZapisu(w))
     await wczytaj()
@@ -141,6 +179,15 @@ export function OdczytyLicznika({
   }) {
     const roznica = w.korekta_km === null ? null : Math.abs(w.korekta_km)
     switch (w.wynik) {
+      case 'kontrolny':
+        return roznica === null || roznica < 1
+          ? `Odczyt kontrolny zapisany. Ewidencja pokazuje na ten moment `
+            + `${licznik(w.stan_wyliczony)} km - zgadza się z licznikiem.`
+          : `Odczyt kontrolny zapisany. Ewidencja pokazuje na ten moment `
+            + `${licznik(w.stan_wyliczony)} km, czyli `
+            + `${formatujKm(roznica)} km ${(w.korekta_km ?? 0) > 0 ? 'mniej' : 'więcej'} `
+            + 'niż licznik. Dokument zostaje bez zmian - rozbieżność zamknie dopiero '
+            + 'odczyt na koniec miesiąca.'
       case 'zgodny':
         return `Odczyt zgodny z ewidencją${roznica !== null ? ` (różnica ${formatujKm(roznica)} km, poniżej progu korekty)` : ''}.`
       case 'skorygowany':
@@ -148,8 +195,12 @@ export function OdczytyLicznika({
              + `korekcyjną ${w.korekta_km !== null && w.korekta_km > 0 ? '+' : ''}`
              + `${formatujKm(w.korekta_km ?? 0)} km, żeby stan licznika zgadzał się z pojazdem.`
       case 'oczekuje':
-        return 'Odczyt zapisany. Danych GPS za ten miesiąc jeszcze nie ma, więc korekta '
-             + 'naliczy się sama po ich wgraniu.'
+        // Normalna sytuacja dla odczytu z BIEŻĄCEGO miesiąca: ewidencję generuje się
+        // pierwszego dnia następnego, więc cotygodniowe odczyty czekają tu do końca
+        // miesiąca i przeliczają się same po wgraniu danych.
+        return 'Odczyt zapisany. Ewidencji za ten miesiąc jeszcze nie ma - porównanie '
+             + 'z GPS naliczy się samo po wgraniu danych, pierwszego dnia następnego '
+             + 'miesiąca.'
       case 'zablokowany':
         return 'Odczyt zapisany, ale ewidencja za ten miesiąc jest już zaakceptowana. '
              + 'Korektę może nanieść tylko administrator.'
@@ -169,10 +220,13 @@ export function OdczytyLicznika({
 
   const ksiegowosc = profil.rola === 'ksiegowosc'
   const ostatni = odczyty[0]
+  const zamykaMiesiac = rodzaj === 'koniec_miesiaca'
   // Korekta trafia do ewidencji za miesiąc z DATY odczytu. Gdy data wypada poza
   // miesiącem tej ewidencji, mówimy o tym OD RAZU - inaczej kierownik zapisuje odczyt,
   // nic się nie zmienia i nie wie dlaczego.
-  const innyMiesiac = data !== '' && (
+  // Dotyczy to wyłącznie odczytu zamykającego miesiąc - kontrolny z definicji bywa
+  // z dowolnego dnia i niczego nie przesuwa.
+  const innyMiesiac = zamykaMiesiac && data !== '' && (
     Number(data.slice(0, 4)) !== rok || Number(data.slice(5, 7)) !== miesiac
   )
 
@@ -192,6 +246,22 @@ export function OdczytyLicznika({
             max={dzisiajPL()}
             onChange={(e) => setData(e.target.value)}
             className="mt-1 w-40 rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blekit focus:outline-none"
+          />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-slate-700" htmlFor="odczyt-godzina">
+            Godzina odczytu
+          </label>
+          {/* Bez godziny odczyt porównuje się z całym dniem, więc kurs wykonany PO
+              odczycie zawyża ewidencję. Przy aucie dojeżdżającym z kwatery to co tydzień
+              ten sam, nieprawdziwy minus wielkości drogi powrotnej. */}
+          <input
+            id="odczyt-godzina"
+            type="time"
+            value={godzina}
+            max={data === dzisiajPL() ? terazPL() : undefined}
+            onChange={(e) => setGodzina(e.target.value)}
+            className="mt-1 w-28 rounded-md border border-slate-300 px-3 py-2 text-sm tabular-nums focus:border-blekit focus:outline-none"
           />
         </div>
         <div>
@@ -219,16 +289,45 @@ export function OdczytyLicznika({
             className="mt-1 w-full rounded-md border border-slate-300 px-3 py-2 text-sm focus:border-blekit focus:outline-none"
           />
         </div>
+        <div>
+          <label className="block text-xs font-medium text-slate-700" htmlFor="odczyt-rodzaj">
+            Rodzaj odczytu
+          </label>
+          <select
+            id="odczyt-rodzaj"
+            value={rodzaj}
+            onChange={(e) => setRodzaj(e.target.value as RodzajOdczytu)}
+            className="mt-1 w-56 rounded-md border border-slate-300 bg-white px-3 py-2 text-sm focus:border-blekit focus:outline-none"
+          >
+            <option value="kontrolny">Kontrolny (w trakcie miesiąca)</option>
+            <option value="koniec_miesiaca">Na koniec miesiąca (zamyka miesiąc)</option>
+          </select>
+        </div>
         <Button wariant="glowny" disabled={zajety} onClick={zapisz}>
           Zapisz odczyt licznika
         </Button>
       </div>
 
       <p className="mt-2 text-xs text-slate-600">
-        Wpisz tu prawdziwy stan licznika {nrRejestracyjny}, kiedy go odczytasz - nie musi to
-        być koniec miesiąca. Aplikacja porówna go z kilometrami naliczonymi z GPS i, jeśli
-        się rozjeżdżają, dopisze w ewidencji pozycję korekcyjną na ten dzień, żeby licznik
-        w dokumencie zgadzał się z pojazdem.
+        Wpisz tu prawdziwy stan licznika {nrRejestracyjny}, kiedy go odczytasz.{' '}
+        {zamykaMiesiac ? (
+          <>
+            <span className="font-medium">Odczyt na koniec miesiąca</span> zamyka miesiąc:
+            aplikacja porówna go z kilometrami z GPS i, jeśli się rozjeżdżają, dopisze
+            w ewidencji pozycję korekcyjną, żeby licznik w dokumencie zgadzał się
+            z pojazdem.
+          </>
+        ) : (
+          <>
+            <span className="font-medium">Odczyt kontrolny</span> niczego w dokumencie nie
+            zmienia - tylko pokazuje, o ile ewidencja rozjeżdża się z licznikiem na ten
+            moment. Dzięki temu cotygodniowa kontrola nie zostawia w ewidencji czterech
+            pozycji korekcyjnych, a rozbieżność widać już w trakcie miesiąca i wiadomo,
+            w którym tygodniu powstała.
+          </>
+        )}{' '}
+        Podaj godzinę, jeśli po odczycie auto jeszcze tego dnia jeździło - bez niej
+        porównanie obejmuje cały dzień razem z późniejszymi kursami.
       </p>
 
       {innyMiesiac && (
@@ -269,6 +368,7 @@ export function OdczytyLicznika({
             {!rozwinieta && ostatni && (
               <span className="ml-1 font-normal text-slate-600">
                 - ostatni {dataPL(ostatni.data_odczytu)}: {licznik(ostatni.stan)} km
+                {ostatni.rodzaj === 'kontrolny' && ' (kontrolny)'}
               </span>
             )}
           </button>
@@ -278,6 +378,7 @@ export function OdczytyLicznika({
               <thead className="text-slate-500">
                 <tr>
                   <th className="py-1 pr-3">Dzień odczytu</th>
+                  <th className="py-1 pr-3">Godz.</th>
                   <th className="py-1 pr-3">Licznik</th>
                   <th className="py-1 pr-3">Z ewidencji</th>
                   <th className="py-1 pr-3">Różnica</th>
@@ -290,6 +391,9 @@ export function OdczytyLicznika({
                 {odczyty.map((o) => (
                   <tr key={o.id}>
                     <td className="py-1 pr-3 whitespace-nowrap">{dataPL(o.data_odczytu)}</td>
+                    <td className="py-1 pr-3 tabular-nums text-slate-600">
+                      {o.godzina_odczytu ? o.godzina_odczytu.slice(0, 5) : 'cały dzień'}
+                    </td>
                     <td className="py-1 pr-3 tabular-nums">{licznik(o.stan)}</td>
                     <td className="py-1 pr-3 tabular-nums text-slate-600">
                       {o.stan_wyliczony === null ? '—' : licznik(o.stan_wyliczony)}
