@@ -94,7 +94,7 @@ export function kmLiczba(wartosc: number | null | undefined) {
   // rozdzielczej jest niższy od sumy tras i korekta musi je odjąć. Wcześniejsze
   // `if (!(x > 0)) return 0` zerowało taką pozycję: w kolumnie widniało 0,00, a suma
   // „Razem" i wyliczony stan licznika pomijały korektę, więc dokument nadal nie zgadzał
-  // się z pojazdem (SC452GF, październik 2026: -182,32 km znikało bez śladu).
+  // się z pojazdem (jeden z pojazdów, październik 2026: -182,32 km znikało bez śladu).
   if (x < 0) return Math.min(-MINIMALNY_DYSTANS, zaokraglona)
   return Math.max(MINIMALNY_DYSTANS, zaokraglona)
 }
