@@ -95,6 +95,12 @@ export interface OdczytLicznika {
   wynik: WynikOdczytu
   naliczono_at: string | null
   utworzono: string
+  /** Zdjecie licznika - dowod dodatkowy do ewidencji. Sciezka w kubelku 'odczyty'. */
+  zdjecie_sciezka: string | null
+  /** Godzina wykonania zdjecia z danych EXIF aparatu. Null, gdy aparat jej nie zapisal
+   *  albo zdjecie przeszlo przez komunikator, ktory EXIF usuwa. */
+  zdjecie_wykonano: string | null
+  zdjecie_dodano: string | null
 }
 
 export type WynikOdczytu =

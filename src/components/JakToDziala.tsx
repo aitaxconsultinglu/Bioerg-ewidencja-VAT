@@ -116,6 +116,56 @@ export function JakToDziala({ profil, naListe }: Props) {
         </>)}
       </Sekcja>
 
+      <Sekcja tytul="Procedura rozliczania kilometrów (dokument wewnętrzny)">
+        <p className="text-xs text-slate-500">
+          Opis zasad, według których powstaje i jest weryfikowana ewidencja przebiegu
+          pojazdu w Bioerg. Obowiązuje od ewidencji za listopad 2026.
+        </p>
+
+        <p><strong>1. Skąd biorą się kilometry.</strong> Trasy, daty i liczba kilometrów
+        pochodzą z urządzeń GPS zamontowanych w pojazdach. Urządzenia nie są podłączone do
+        komputera pokładowego ani do licznika - zasilane są wyłącznie z akumulatora, więc
+        przebieg wyliczają z zarejestrowanych pozycji. Cel wyjazdu i osobę kierującą
+        uzupełnia kierownik, i to on podpisuje ewidencję.</p>
+
+        <p><strong>2. Znane ograniczenie urządzeń.</strong> Gdy pojazd stoi, odbiornik
+        potrafi raportować kolejne pozycje nieco przesunięte względem siebie, a system
+        dostawcy sumuje te przesunięcia do przebiegu. Dlatego przebieg przeliczamy
+        samodzielnie i pomijamy odcinki, w których urządzenie raportuje zerową prędkość -
+        prędkość mierzona jest niezależnie od pozycji i przy postoju wynosi zero. To
+        ogranicza, ale nie usuwa całej rozbieżności, dlatego obowiązuje punkt 3.</p>
+
+        <p><strong>3. Odczyt licznika jest obowiązkowy.</strong> Na ostatni dzień każdego
+        miesiąca kierownik podaje stan licznika z deski rozdzielczej - w pełnych
+        kilometrach, z godziną odczytu i ze zdjęciem licznika. Bez kompletu tych danych
+        ewidencji nie da się wysłać do akceptacji. Godzina jest konieczna, bo porównanie
+        obejmuje wyłącznie trasy zakończone do tej godziny; zdjęcie jest dowodem
+        potwierdzającym odczyt, a aplikacja odczytuje z niego godzinę wykonania.</p>
+
+        <p><strong>4. Jak rozliczana jest różnica.</strong> Aplikacja porównuje stan
+        licznika z przebiegiem wynikającym z tras. Różnica poniżej jednego kilometra to
+        zaokrąglenia i nie tworzy wpisu. Każda większa trafia do ewidencji jako osobna,
+        wyróżniona <strong>pozycja korekcyjna</strong> z datą odczytu, nazwiskiem osoby,
+        która go podała, i wskazaniem, że wynika z odczytu licznika. Dzięki temu stan
+        licznika w dokumencie jest równy stanowi w pojeździe, a ślad po różnicy pozostaje
+        widoczny. Różnic nie pomijamy i nie zaokrąglamy - korygujemy je jawnie.</p>
+
+        <p><strong>5. Kontrola w trakcie miesiąca.</strong> Niezależnie od odczytu
+        zamykającego miesiąc kierownicy podają odczyty kontrolne (co tydzień, w piątek po
+        ostatnim przejeździe). Nie zmieniają one dokumentu - służą temu, żeby rozbieżność
+        wykryć w tygodniu, w którym powstała, a nie dopiero po miesiącu.</p>
+
+        <p><strong>6. Podział odpowiedzialności.</strong> Kierownik odpowiada za cel
+        wyjazdu, osobę kierującą, odczyt licznika i podpis. Rozliczenie różnicy między
+        licznikiem a danymi GPS należy do księgowości i administratora systemu - kierownik
+        nie jest o nie pytany i nie może go obejść. Księgowość akceptuje ewidencję albo
+        odsyła ją do poprawki ze wskazaniem konkretnych pozycji.</p>
+
+        <p><strong>7. Ślad zmian.</strong> Każda zmiana w zaakceptowanej ewidencji wymaga
+        uprawnień administratora, trafia do dziennika zmian wraz z poprzednią wartością
+        i wymusza ponowne wygenerowanie archiwalnego pliku PDF.</p>
+      </Sekcja>
+
       <Sekcja tytul="Droga ewidencji">
         <ol className="ml-4 list-decimal space-y-1">
           <li><strong>Wygenerowana</strong> — dane z GPS czekają na uzupełnienie.</li>

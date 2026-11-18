@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useState } from 'react'
 import { supabase } from '@/lib/supabase'
 import type { OdczytLicznika, Profil, RodzajOdczytu, WynikOdczytu } from '@/lib/types'
-import { MIESIACE_PL, dataPL, formatujKm, licznik } from '@/lib/format'
+import { MIESIACE_PL, dataGodzinaPL, dataPL, formatujKm, licznik } from '@/lib/format'
+import { dataISOPL, godzinaPL, kiedyZrobionoZdjecie } from '@/lib/exif'
 import { cn } from '@/lib/utils'
 import { Button } from './ui/button'
 
@@ -112,6 +113,9 @@ export function OdczytyLicznika({
   // Zamknięcie miesiąca to świadoma decyzja i wymaga przestawienia tego pola.
   const [rodzaj, setRodzaj] = useState<RodzajOdczytu>('kontrolny')
   const [stan, setStan] = useState('')
+  const [zdjecie, setZdjecie] = useState<File | null>(null)
+  const [zdjecieWykonano, setZdjecieWykonano] = useState<Date | null>(null)
+  const [zdjecieBezExif, setZdjecieBezExif] = useState(false)
   const [uwaga, setUwaga] = useState('')
   const [zajety, setZajety] = useState(false)
   const [blad, setBlad] = useState<string | null>(null)
@@ -125,7 +129,7 @@ export function OdczytyLicznika({
     const kolumny = profil.administrator
       ? '*'
       : 'id, vehicle_id, data_odczytu, godzina_odczytu, stan, rodzaj, uwaga, '
-        + 'wpisal_nazwa, wynik, utworzono'
+        + 'wpisal_nazwa, wynik, utworzono, zdjecie_sciezka, zdjecie_wykonano, zdjecie_dodano'
     const { data: o } = await supabase
       .from('odczyty_licznika').select(kolumny)
       .eq('vehicle_id', vehicleId)
@@ -139,10 +143,34 @@ export function OdczytyLicznika({
   // wpisu nie może po cichu dopisać korekty do odczytu z zupełnie innego dnia.
   useEffect(() => { setRodzaj('kontrolny') }, [data])
 
+  /** Wybór zdjęcia: czytamy z niego godzinę wykonania i podpowiadamy nią datę i godzinę
+   *  odczytu. Zdjęcie przesłane komunikatorem zwykle nie ma już danych EXIF - mówimy
+   *  o tym wprost, zamiast po cichu zostawiać puste pole. */
+  async function wybierzZdjecie(plik: File | null) {
+    setZdjecie(plik)
+    setZdjecieWykonano(null)
+    setZdjecieBezExif(false)
+    if (!plik) return
+    const w = await kiedyZrobionoZdjecie(plik)
+    if (!w) { setZdjecieBezExif(true); return }
+    setZdjecieWykonano(w.kiedy)
+    const dzien = dataISOPL(w.kiedy)
+    if (dzien <= dzisiajPL()) setData(dzien)
+    setGodzina(godzinaPL(w.kiedy))
+  }
+
   async function zapisz() {
     const tekst = stan.trim().replace(',', '.')
     if (tekst === '' || !Number.isFinite(Number(tekst)) || Number(tekst) < 0) {
-      setBlad('Stan licznika musi być liczbą nieujemną, np. 209465 albo 209465,4.')
+      setBlad('Stan licznika musi być liczbą nieujemną, np. 209465.')
+      return
+    }
+    // Licznik w aucie pokazuje pełne kilometry. Część dziesiętna znaczy, że liczba
+    // została skądś przepisana - w październiku sześć ewidencji podpisano wartością
+    // z setnymi, czyli wprost przeniesioną z ekranu aplikacji.
+    if (!Number.isInteger(Number(tekst))) {
+      setBlad('Podaj stan licznika w pełnych kilometrach, tak jak pokazuje go licznik '
+            + 'w aucie - bez części po przecinku.')
       return
     }
     if (!data) {
@@ -152,6 +180,23 @@ export function OdczytyLicznika({
     setZajety(true)
     setBlad(null)
     setKomunikat(null)
+
+    // Zdjęcie idzie do magazynu PRZED zapisem odczytu - gdyby wysyłka się nie udała,
+    // nie chcemy odczytu, który wskazuje na nieistniejący plik.
+    let sciezkaZdjecia: string | null = null
+    if (zdjecie) {
+      const rozszerzenie = (zdjecie.name.split('.').pop() || 'jpg').toLowerCase()
+      sciezkaZdjecia = `${vehicleId}/${data}.${rozszerzenie}`
+      const { error: bladWysylki } = await supabase.storage
+        .from('odczyty')
+        .upload(sciezkaZdjecia, zdjecie, { contentType: zdjecie.type, upsert: true })
+      if (bladWysylki) {
+        setZajety(false)
+        setBlad(`Nie udało się wysłać zdjęcia licznika: ${bladWysylki.message}`)
+        return
+      }
+    }
+
     const { data: wynik, error } = await supabase.rpc('zapisz_odczyt_licznika', {
       p_vehicle_id: vehicleId,
       p_data: data,
@@ -161,6 +206,8 @@ export function OdczytyLicznika({
       // i tak właśnie liczy to baza.
       p_godzina: godzina || null,
       p_rodzaj: rodzaj,
+      p_zdjecie: sciezkaZdjecia,
+      p_zdjecie_wykonano: zdjecieWykonano ? zdjecieWykonano.toISOString() : null,
     })
     setZajety(false)
     if (error) { setBlad(error.message); return }
@@ -170,6 +217,9 @@ export function OdczytyLicznika({
     }
     setStan('')
     setGodzina('')
+    setZdjecie(null)
+    setZdjecieWykonano(null)
+    setZdjecieBezExif(false)
     setUwaga('')
     setKomunikat(opisZapisu(w))
     await wczytaj()
@@ -228,6 +278,15 @@ export function OdczytyLicznika({
         return 'Odczyt zapisany, ale ewidencja za ten miesiąc jest już zaakceptowana. '
              + 'Korektę może nanieść tylko administrator.'
     }
+  }
+
+  /** Zdjęcia leżą w prywatnym kubelku - otwieramy je przez adres podpisany na minutę,
+   *  żeby nie dało się ich rozesłać linkiem. */
+  async function pokazZdjecie(sciezka: string) {
+    const { data: link, error } = await supabase.storage
+      .from('odczyty').createSignedUrl(sciezka, 60)
+    if (error || !link) { setBlad('Nie udało się otworzyć zdjęcia.'); return }
+    window.open(link.signedUrl, '_blank', 'noopener')
   }
 
   async function usun(id: string) {
@@ -330,6 +389,19 @@ export function OdczytyLicznika({
           />
         </div>
         <div>
+          <label className="block text-xs font-medium text-slate-700" htmlFor="odczyt-zdjecie">
+            Zdjęcie licznika
+          </label>
+          <input
+            id="odczyt-zdjecie"
+            type="file"
+            accept="image/*"
+            capture="environment"
+            onChange={(e) => void wybierzZdjecie(e.target.files?.[0] ?? null)}
+            className="mt-1 w-56 rounded-md border border-slate-300 bg-white px-3 py-1.5 text-xs file:mr-2 file:rounded file:border-0 file:bg-slate-100 file:px-2 file:py-1 file:text-xs"
+          />
+        </div>
+        <div>
           <label className="block text-xs font-medium text-slate-700" htmlFor="odczyt-rodzaj">
             Rodzaj odczytu
           </label>
@@ -395,6 +467,22 @@ export function OdczytyLicznika({
         </p>
       )}
 
+      {zdjecie && zdjecieWykonano && (
+        <p className="mt-2 rounded-md bg-white px-3 py-2 text-sm text-slate-700 ring-1 ring-slate-300">
+          Zdjęcie zrobiono <strong>{dataPL(dataISOPL(zdjecieWykonano))}</strong> o{' '}
+          <strong>{godzinaPL(zdjecieWykonano)}</strong> - podstawiłem tę datę i godzinę
+          powyżej. Jeśli licznik spisano kiedy indziej, popraw je ręcznie.
+        </p>
+      )}
+      {zdjecie && zdjecieBezExif && (
+        <p className="mt-2 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900 ring-1 ring-amber-300">
+          To zdjęcie nie ma zapisanej godziny wykonania - tak dzieje się ze zdjęciami
+          przesłanymi komunikatorem albo zrzutami ekranu. Zdjęcie się zapisze, ale datę
+          i godzinę odczytu wpisz samodzielnie. Najpewniejsze jest zdjęcie wgrane wprost
+          z aparatu telefonu.
+        </p>
+      )}
+
       {moznaZamknac && (
         <p className="mt-2 rounded-md bg-white px-3 py-2 text-sm text-slate-700 ring-1 ring-slate-300">
           To ostatni dzień miesiąca. Zapisany teraz odczyt będzie <strong>kontrolny</strong>,
@@ -442,6 +530,7 @@ export function OdczytyLicznika({
                   <th className="py-1 pr-3">Dzień odczytu</th>
                   <th className="py-1 pr-3">Godz.</th>
                   <th className="py-1 pr-3">Licznik</th>
+                  <th className="py-1 pr-3">Zdjęcie</th>
                   {pokazujRoznice && <th className="py-1 pr-3">Z ewidencji</th>}
                   {pokazujRoznice && <th className="py-1 pr-3">Różnica</th>}
                   <th className="py-1 pr-3">{prosty ? 'Uwaga' : 'Wynik'}</th>
@@ -457,6 +546,19 @@ export function OdczytyLicznika({
                       {o.godzina_odczytu ? o.godzina_odczytu.slice(0, 5) : 'cały dzień'}
                     </td>
                     <td className="py-1 pr-3 tabular-nums">{licznik(o.stan)}</td>
+                    <td className="py-1 pr-3">
+                      {o.zdjecie_sciezka ? (
+                        <button
+                          className="text-blekit-ciemny hover:underline"
+                          onClick={() => void pokazZdjecie(o.zdjecie_sciezka!)}
+                          title={o.zdjecie_wykonano
+                            ? `Zrobione ${dataGodzinaPL(o.zdjecie_wykonano)}`
+                            : 'Zdjęcie bez zapisanej godziny wykonania'}
+                        >
+                          pokaż
+                        </button>
+                      ) : <span className="text-slate-400">—</span>}
+                    </td>
                     {pokazujRoznice && (
                       <td className="py-1 pr-3 tabular-nums text-slate-600">
                         {o.stan_wyliczony === null ? '—' : licznik(o.stan_wyliczony)}
