@@ -3,10 +3,11 @@ import { ArrowLeft, Download, FileSpreadsheet } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import type {
   Ewidencja as TEwidencja, OznaczeniePola, PoleEdytowalne, PoleTabeli, Profil, Trasa,
-  WpisAudytu,
+  WpisAudytu, OdczytLicznika,
 } from '@/lib/types'
 import { jestPolemGPS } from '@/lib/types'
 import {
+  dataPL,
   ETYKIETY_STATUSU, KOLORY_STATUSU, celDoUzupelnienia,
   dataGodzinaPL, formatujKm, licznik, miesiacRok, sumaKm,
 } from '@/lib/format'
@@ -42,6 +43,7 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
   const [ewidencja, setEwidencja] = useState<TEwidencja | null>(null)
   const [trasy, setTrasy] = useState<Trasa[]>([])
   const [audyt, setAudyt] = useState<WpisAudytu[]>([])
+  const [odczytZamykajacy, setOdczytZamykajacy] = useState<OdczytLicznika | null>(null)
   const [oznaczenia, setOznaczenia] = useState<OznaczeniePola[]>([])
   const [trybOznaczania, setTrybOznaczania] = useState(false)
   const [podpis, setPodpis] = useState('')
@@ -75,9 +77,20 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
     setPodpisAkceptacji(e?.akceptacja_imie_nazwisko ?? (profil.rola === 'ksiegowosc' ? profil.imie_nazwisko : ''))
     const odczyt = e?.stan_licznika_koniec_rzeczywisty
     setLicznikRzeczywisty(odczyt === null || odczyt === undefined ? '' : String(odczyt))
+    // Odczyt zamykający miesiąc - od listopada 2026 bez niego nie da się wysłać
+    // ewidencji. Liczy go baza (odczyt_zamykajacy), żeby reguła była jedna.
+    const { data: oz } = await supabase.rpc('odczyt_zamykajacy', { p_log_id: logId })
+    setOdczytZamykajacy((Array.isArray(oz) ? oz[0] : oz) ?? null)
   }, [logId, profil.imie_nazwisko, profil.rola])
 
   useEffect(() => { void wczytaj() }, [wczytaj])
+
+  /** Od listopada 2026 miesiąc zamyka WYŁĄCZNIE odczyt z panelu odczytów: data
+   *  ostatniego dnia, godzina i rozliczenie z GPS. Stare pole tekstowe przyjmowało
+   *  dowolną liczbę i niczego nie uruchamiało - w październiku sześć ewidencji
+   *  podpisano wartością przepisaną z ekranu, z setnymi częściami kilometra. */
+  const nowyTrybOdczytu = !!ewidencja
+    && (ewidencja.rok > 2026 || (ewidencja.rok === 2026 && ewidencja.miesiac >= 11))
 
   const zaakceptowana = ewidencja?.status === 'zaakceptowana'
   const admin = profil.administrator
@@ -201,6 +214,33 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
     }
     // WARSTWA 3: ewidencja przebiegu musi zgadzać się z licznikiem pojazdu. Bez tego
     // usterka urządzenia GPS trafia do dokumentacji VAT z podpisem kierownika.
+    //
+    // Od listopada 2026 sprawdza to w ostatniej instancji wyzwalacz bazy
+    // (wymus_odczyt_licznika) - tu robimy to samo wcześniej, żeby kierownik dostał
+    // zrozumiały komunikat zamiast błędu z bazy.
+    if (nowyTrybOdczytu) {
+      if (!odczytZamykajacy) {
+        setBlad('Podaj stan licznika na ostatni dzień miesiąca. W panelu „Odczyt licznika” '
+              + 'na górze strony wpisz datę ostatniego dnia miesiąca, godzinę odczytu i stan '
+              + 'z deski rozdzielczej, a w polu rodzaju wybierz „Stan na koniec miesiąca”.')
+        return
+      }
+      if (!odczytZamykajacy.godzina_odczytu) {
+        setBlad('Uzupełnij godzinę odczytu licznika. Bez niej aplikacja porównuje odczyt '
+              + 'z całym dniem, razem z kursami wykonanymi już po spisaniu licznika.')
+        return
+      }
+      if (!['zgodny', 'skorygowany'].includes(odczytZamykajacy.wynik)) {
+        setBlad('Odczyt licznika nie został jeszcze rozliczony z danymi GPS. Zapisz go '
+              + 'ponownie, a jeśli to nie pomoże - zgłoś księgowości.')
+        return
+      }
+      setZajety(true)
+      setBlad(null)
+      await wyslij()
+      return
+    }
+
     const wyliczony = (ewidencja?.stan_licznika_poczatek ?? 0) + sumaKm(trasy)
     const roznica = roznicaZLicznikiem(licznikRzeczywisty, wyliczony)
     if (roznica === null) {
@@ -217,6 +257,12 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
     }
     setZajety(true)
     setBlad(null)
+    await wyslij()
+  }
+
+  /** Sam zapis statusu i powiadomienie - wspólne dla obu ścieżek walidacji.
+   *  Zakłada, że walidacja już przeszła i że setZajety(true) jest ustawione. */
+  async function wyslij() {
     const { error } = await supabase.from('monthly_logs').update({
       status: 'wyslana_do_akceptacji',
       podpis_imie_nazwisko: podpis,
@@ -622,6 +668,33 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
       <div className="flex flex-wrap items-end justify-between gap-4 rounded-lg border border-slate-200 bg-white p-4">
         {mozeWyslac && (
           <>
+            {nowyTrybOdczytu ? (
+              <div className="max-w-xl">
+                <p className="text-sm font-medium text-slate-700">
+                  Stan licznika na ostatni dzień miesiąca{' '}
+                  <span className="text-red-700">(pole obowiązkowe)</span>
+                </p>
+                {odczytZamykajacy ? (
+                  <p className="mt-1 rounded-md bg-green-50 px-3 py-2 text-sm text-green-900 ring-1 ring-green-300">
+                    Podany: <strong>{licznik(odczytZamykajacy.stan)} km</strong> na{' '}
+                    {dataPL(odczytZamykajacy.data_odczytu)}
+                    {odczytZamykajacy.godzina_odczytu
+                      ? `, godz. ${odczytZamykajacy.godzina_odczytu.slice(0, 5)}`
+                      : ' - brakuje godziny odczytu'}.
+                  </p>
+                ) : (
+                  <p className="mt-1 rounded-md bg-amber-50 px-3 py-2 text-sm text-amber-900 ring-1 ring-amber-400">
+                    Bez niego nie da się wysłać ewidencji do akceptacji. Wpisz go w panelu{' '}
+                    <strong>„Odczyt licznika”</strong> na górze strony: data ostatniego dnia
+                    miesiąca, <strong>godzina odczytu</strong> i stan z deski rozdzielczej,
+                    a w polu rodzaju wybierz <strong>„Stan na koniec miesiąca”</strong>.
+                  </p>
+                )}
+                <p className="mt-1 text-xs text-slate-500">
+                  Z tras w tabeli wychodzi {licznik(licznikWyliczony)} km.
+                </p>
+              </div>
+            ) : (
             <div>
               <label className="block text-sm font-medium text-slate-700" htmlFor="licznik-rzeczywisty">
                 Stan licznika pojazdu na koniec miesiąca (odczyt z deski rozdzielczej)
@@ -647,6 +720,7 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
                 </p>
               )}
             </div>
+            )}
             <div>
               <label className="block text-sm font-medium text-slate-700" htmlFor="podpis">
                 Podpis kierownika (imię i nazwisko)
