@@ -230,11 +230,6 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
               + 'z całym dniem, razem z kursami wykonanymi już po spisaniu licznika.')
         return
       }
-      if (!['zgodny', 'skorygowany'].includes(odczytZamykajacy.wynik)) {
-        setBlad('Odczyt licznika nie został jeszcze rozliczony z danymi GPS. Zapisz go '
-              + 'ponownie, a jeśli to nie pomoże - zgłoś księgowości.')
-        return
-      }
       setZajety(true)
       setBlad(null)
       await wyslij()
