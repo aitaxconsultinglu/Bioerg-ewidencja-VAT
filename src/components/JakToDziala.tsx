@@ -23,8 +23,6 @@ function Sekcja({ tytul, children }: { tytul: string; children: React.ReactNode 
 }
 
 export function JakToDziala({ profil, naListe }: Props) {
-  const ksiegowosc = profil.rola === 'ksiegowosc'
-  const admin = profil.administrator
   const tylkoKierownik = profil.rola === 'kierownik' && !profil.administrator
 
   return (
@@ -150,20 +148,6 @@ export function JakToDziala({ profil, naListe }: Props) {
         licznika w dokumencie jest równy stanowi w pojeździe, a ślad po różnicy pozostaje
         widoczny. Różnic nie pomijamy i nie zaokrąglamy - korygujemy je jawnie.</p>
 
-        <p><strong>5. Kontrola w trakcie miesiąca.</strong> Niezależnie od odczytu
-        zamykającego miesiąc kierownicy podają odczyty kontrolne (co tydzień, w piątek po
-        ostatnim przejeździe). Nie zmieniają one dokumentu - służą temu, żeby rozbieżność
-        wykryć w tygodniu, w którym powstała, a nie dopiero po miesiącu.</p>
-
-        <p><strong>6. Podział odpowiedzialności.</strong> Kierownik odpowiada za cel
-        wyjazdu, osobę kierującą, odczyt licznika i podpis. Rozliczenie różnicy między
-        licznikiem a danymi GPS należy do księgowości i administratora systemu - kierownik
-        nie jest o nie pytany i nie może go obejść. Księgowość akceptuje ewidencję albo
-        odsyła ją do poprawki ze wskazaniem konkretnych pozycji.</p>
-
-        <p><strong>7. Ślad zmian.</strong> Każda zmiana w zaakceptowanej ewidencji wymaga
-        uprawnień administratora, trafia do dziennika zmian wraz z poprzednią wartością
-        i wymusza ponowne wygenerowanie archiwalnego pliku PDF.</p>
       </Sekcja>
 
       <Sekcja tytul="Droga ewidencji">
@@ -218,53 +202,6 @@ export function JakToDziala({ profil, naListe }: Props) {
           kontaktów, żeby nie trafiały do spamu.
         </p>
       </Sekcja>
-
-      {ksiegowosc && (
-        <Sekcja tytul="Co może księgowość">
-          <ul className="ml-4 list-disc space-y-1">
-            <li>Zatwierdzić ewidencję pojedynczo albo wszystkie naraz z poziomu listy.</li>
-            <li>
-              Odesłać do poprawki z komentarzem oraz wskazać konkretne komórki, które mają
-              zostać poprawione.
-            </li>
-            <li>Pobrać wszystkie ewidencje okresu jako paczkę PDF albo Excel.</li>
-            <li>
-              Odblokować zatwierdzoną ewidencję — to usuwa podpis akceptacji i trzeba
-              zatwierdzić ją ponownie.
-            </li>
-            <li>
-              Odświeżyć archiwalny PDF, gdy dane poprawiono już po zatwierdzeniu. To nie
-              rusza statusu ani podpisów.
-            </li>
-            <li>Zakładać i usuwać konta oraz podejrzeć historię wysłanych maili.</li>
-            <li>
-              Poprawiać pozycje <strong>bezpośrednio w tabeli</strong>, także gdy ewidencja
-              jest już wysłana do akceptacji. Odsyłanie do poprawki ma sens, gdy czegoś nie
-              wiadomo i musi to uzupełnić kierownik - literówkę szybciej poprawić samemu.
-            </li>
-            <li>Usuwać odczyty licznika razem z korektami, które z nich wynikły.</li>
-          </ul>
-        </Sekcja>
-      )}
-
-      {admin && (
-        <Sekcja tytul="Uprawnienia administratora">
-          <p>
-            Konto administratora edytuje <strong>wszystkie kolumny na każdym etapie</strong>,
-            również w ewidencji zaakceptowanej i również te pochodzące z GPS - datę wyjazdu
-            i liczbę kilometrów. Komórki edytowalne tylko dla administratora mają bursztynową
-            obwódkę.
-          </p>
-          <p>
-            Dwie rzeczy dzieją się przy tym automatycznie: zmiana kilometrów{' '}
-            <strong>przelicza stany licznika</strong> we wszystkich kolejnych miesiącach tego
-            pojazdu, a każda poprawka trafia do dziennika zmian. Jedna rzecz nie dzieje się
-            sama - po poprawce w ewidencji zaakceptowanej trzeba użyć{' '}
-            <strong>„Odśwież PDF”</strong>, bo archiwalny plik powstał w chwili akceptacji
-            i inaczej zostanie w starej wersji.
-          </p>
-        </Sekcja>
-      )}
 
       <Sekcja tytul="Konto i hasło">
         <p>
