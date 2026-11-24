@@ -613,7 +613,13 @@ export function OdczytyLicznika({
                     </td>
                     <td className="py-1 pr-3 text-slate-600">{o.wpisal_nazwa || '—'}</td>
                     <td className="py-1 text-right">
-                      {ksiegowosc && o.korekta_km !== null
+                      {/* Rozkladanie roznicy dzieje sie samo przy zapisie odczytu
+                          (patrz nalicz_odczyty_pojazdu w bazie). Ten przycisk to narzedzie
+                          administratora na wypadek, gdy automat odmowil - np. gdy
+                          urzadzenie nie zapisalo przejazdow i roznicy nie da sie rozlozyc
+                          bez falszowania przebiegu. Ksiegowosc tego nie widzi i nie
+                          rozlicza roznic. */}
+                      {profil.administrator && o.korekta_km !== null
                         && Math.abs(Number(o.korekta_km)) >= 1 && (
                         <button
                           disabled={zajety}
