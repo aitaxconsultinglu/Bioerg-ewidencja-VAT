@@ -221,6 +221,11 @@ export function TabelaTras({
     const wEdycji = edytowana?.wiersz === wiersz && edytowana.pole === pole
     const edytowalna = administrator && !zablokowana && !trybOznaczania && !trasa.korekta
     const tresc = pole === 'km' ? km(trasa.km) : dataPL(trasa.data_wyjazdu)
+    // Slad po rozlozeniu roznicy licznika - wylacznie dla administratora. Ksiegowosc
+    // i kierownik maja widziec gotowy dokument, nie kuchnie jego powstawania.
+    const skorygowana = pole === 'km' && administrator
+      && trasa.km_gps !== null && trasa.km_gps !== undefined
+      && Math.abs(Number(trasa.km_gps) - Number(trasa.km)) >= 0.01
 
     if (wEdycji) {
       return (
@@ -253,10 +258,20 @@ export function TabelaTras({
           'komorka whitespace-nowrap',
           pole === 'km' ? 'text-right tabular-nums' : 'text-center',
           edytowalna ? 'komorka-edytowalna ring-1 ring-inset ring-amber-200' : 'komorka-tylko-odczyt',
+          skorygowana && 'bg-blue-50',
         )}
         onDoubleClick={() => { if (edytowalna) rozpocznijEdycje(wiersz, pole) }}
       >
         {tresc}
+        {skorygowana && (
+          <span
+            className="ml-1 text-[10px] font-normal text-blue-700"
+            title={`Z GPS wychodzilo ${km(trasa.km_gps ?? 0)} km. Roznice wzgledem licznika `
+              + 'rozlozono na trasy, zeby ewidencja zgadzala sie z pojazdem.'}
+          >
+            ●
+          </span>
+        )}
       </td>
     )
   }

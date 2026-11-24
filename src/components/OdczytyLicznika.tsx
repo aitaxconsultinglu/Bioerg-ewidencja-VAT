@@ -289,6 +289,31 @@ export function OdczytyLicznika({
     window.open(link.signedUrl, '_blank', 'noopener')
   }
 
+  /** Rozklada roznice miedzy licznikiem a GPS na trasy miesiaca, zamiast zostawiac ja
+   *  osobnym wierszem "Korekta stanu licznika".
+   *
+   *  Ksiegowosc uznala taki wiersz 19.11.2026 za niedopuszczalny w ewidencji VAT
+   *  i poprosila o rozlozenie tych kilometrow na trasy, najlepiej te po terenie zakladu.
+   *  Ma to tez uzasadnienie merytoryczne: analiza sladow GPS pokazala, ze blad narasta
+   *  wlasnie przy wolnej jezdzie po terenie, gdzie szum pozycji jest porownywalny
+   *  z rzeczywistym przesunieciem. Baza odmawia rozlozenia, gdy roznica jest za duza -
+   *  wtedy pokazujemy jej powod zamiast cicho nic nie robic. */
+  async function rozloz(id: string) {
+    setZajety(true)
+    setBlad(null)
+    setKomunikat(null)
+    const { data: wynik, error } = await supabase.rpc('rozloz_korekte', { p_odczyt_id: id })
+    setZajety(false)
+    if (error) { setBlad(error.message); return }
+    const w = wynik as { rozlozono: number; tras: number; pula: string } | null
+    setKomunikat(w && w.tras > 0
+      ? `Rozlozono ${formatujKm(w.rozlozono)} km na ${w.tras} tras (${w.pula}). `
+        + 'Pozycja korekcyjna zniknela z ewidencji.'
+      : 'Nie bylo czego rozkladac - ewidencja zgadza sie z licznikiem.')
+    await wczytaj()
+    await poZmianie()
+  }
+
   async function usun(id: string) {
     setZajety(true)
     setBlad(null)
@@ -588,6 +613,18 @@ export function OdczytyLicznika({
                     </td>
                     <td className="py-1 pr-3 text-slate-600">{o.wpisal_nazwa || '—'}</td>
                     <td className="py-1 text-right">
+                      {ksiegowosc && o.korekta_km !== null
+                        && Math.abs(Number(o.korekta_km)) >= 1 && (
+                        <button
+                          disabled={zajety}
+                          onClick={() => void rozloz(o.id)}
+                          className="mr-3 text-blekit-ciemny hover:underline disabled:opacity-50"
+                          title="Rozkłada różnicę między licznikiem a GPS na trasy miesiąca
+                                 i usuwa osobną pozycję korekcyjną z ewidencji"
+                        >
+                          rozłóż na trasy
+                        </button>
+                      )}
                       {ksiegowosc && (
                         <button
                           disabled={zajety}

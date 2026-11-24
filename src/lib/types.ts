@@ -71,6 +71,10 @@ export interface Trasa {
    *  licznika podanym z godzina. */
   godzina_od?: string | null
   godzina_do?: string | null
+  /** Kilometry z GPS sprzed rozlozenia na te trase roznicy wzgledem licznika.
+   *  Null = trasa nigdy nie byla korygowana. Widoczne tylko dla administratora. */
+  km_gps?: number | null
+  korekta_z_odczytu?: string | null
 }
 
 /** Odczyt licznika z deski rozdzielczej, wpisywany przez kierownika w dowolnym dniu.

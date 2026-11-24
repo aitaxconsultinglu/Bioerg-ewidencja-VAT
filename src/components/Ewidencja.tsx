@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useState, useMemo } from 'react'
 import { ArrowLeft, Download, FileSpreadsheet } from 'lucide-react'
 import { supabase } from '@/lib/supabase'
 import type {
@@ -91,6 +91,21 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
    *  podpisano wartością przepisaną z ekranu, z setnymi częściami kilometra. */
   const nowyTrybOdczytu = !!ewidencja
     && (ewidencja.rok > 2026 || (ewidencja.rok === 2026 && ewidencja.miesiac >= 11))
+
+  /** Trasy pokazywane w dokumencie: tabela, sumy, PDF i Excel.
+   *
+   *  Pozycja korekcyjna z odczytu licznika jest narzedziem administratora, a nie trescia
+   *  ewidencji - ksiegowosc uznala ja 19.11.2026 za niedopuszczalna w dokumencie VAT.
+   *  Normalnie takich pozycji w ogole nie ma, bo roznica rozklada sie na trasy
+   *  (rozloz_korekte w bazie); gdy wyjatkowo zostanie - bo roznicy nie dalo sie rozlozyc
+   *  rozsadnie - widzi ja wylacznie administrator, zeby wiedzial, gdzie siedzi problem.
+   *
+   *  Filtrujemy w JEDNYM miejscu, nie osobno w tabeli i osobno w eksporcie: inaczej
+   *  wydruk pokazywalby co innego niz ekran. */
+  const trasyDokumentu = useMemo(
+    () => (profil.administrator ? trasy : trasy.filter((t) => !t.korekta)),
+    [trasy, profil.administrator],
+  )
 
   const zaakceptowana = ewidencja?.status === 'zaakceptowana'
   const admin = profil.administrator
@@ -236,7 +251,7 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
       return
     }
 
-    const wyliczony = (ewidencja?.stan_licznika_poczatek ?? 0) + sumaKm(trasy)
+    const wyliczony = (ewidencja?.stan_licznika_poczatek ?? 0) + sumaKm(trasyDokumentu)
     const roznica = roznicaZLicznikiem(licznikRzeczywisty, wyliczony)
     if (roznica === null) {
       setBlad('Wpisz faktyczny stan licznika pojazdu na koniec miesiąca - bez tego nie da się '
@@ -300,7 +315,7 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
     setZajety(true)
     setBlad(null)
     try {
-      const pdf = await zbudujPdf(ewidencja, trasy)
+      const pdf = await zbudujPdf(ewidencja, trasyDokumentu)
       const sciezka = ewidencja.pdf_path ?? `${ewidencja.rok}/${nazwaPliku(ewidencja, 'pdf')}`
       const { error: bladPliku } = await supabase.storage
         .from('ewidencje').upload(sciezka, pdf, { contentType: 'application/pdf', upsert: true })
@@ -334,7 +349,7 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
         akceptacja_imie_nazwisko: podpisAkceptacji,
         akceptacja_at: new Date().toISOString(),
       }
-      const pdf = await zbudujPdf(doArchiwum, trasy)
+      const pdf = await zbudujPdf(doArchiwum, trasyDokumentu)
       const sciezka = `${ewidencja.rok}/${nazwaPliku(ewidencja, 'pdf')}`
       const { error: bladPliku } = await supabase.storage
         .from('ewidencje').upload(sciezka, pdf, { contentType: 'application/pdf', upsert: true })
@@ -418,7 +433,7 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
   // także po odblokowaniu i ponownej edycji. Dla administratora tabela jest edytowalna
   // również po akceptacji, ale zatwierdzać drugi raz nie ma czego.
   const ksiegowoscMozeDzialac = ksiegowosc && !zaakceptowana
-  const licznikWyliczony = (ewidencja.stan_licznika_poczatek ?? 0) + sumaKm(trasy)
+  const licznikWyliczony = (ewidencja.stan_licznika_poczatek ?? 0) + sumaKm(trasyDokumentu)
   const roznicaLicznika = roznicaZLicznikiem(licznikRzeczywisty, licznikWyliczony)
   const licznikRozjechany =
     roznicaLicznika !== null && Math.abs(roznicaLicznika) > TOLERANCJA_LICZNIKA_KM
@@ -492,10 +507,10 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
           </div>
 
           <div className="flex gap-2">
-            <Button onClick={() => void pobierzExcel(ewidencja, trasy)}>
+            <Button onClick={() => void pobierzExcel(ewidencja, trasyDokumentu)}>
               <FileSpreadsheet className="h-4 w-4" /> Excel
             </Button>
-            <Button onClick={() => void pobierzPdf(ewidencja, trasy)}>
+            <Button onClick={() => void pobierzPdf(ewidencja, trasyDokumentu)}>
               <Download className="h-4 w-4" /> PDF
             </Button>
             {ewidencja.pdf_path && (
@@ -515,7 +530,7 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
                 stanów licznika zawsze równa się sumie z kolumny kilometrów, także po
                 zaokrągleniu tras do 0,1 km. */}
             <dd className="font-medium tabular-nums">
-              {licznik((ewidencja.stan_licznika_poczatek ?? 0) + sumaKm(trasy))}
+              {licznik((ewidencja.stan_licznika_poczatek ?? 0) + sumaKm(trasyDokumentu))}
             </dd>
           </div>
           <div>
@@ -534,7 +549,7 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
           </div>
           <div>
             <dt className="text-slate-500">Razem km</dt>
-            <dd className="font-medium tabular-nums">{formatujKm(sumaKm(trasy))}</dd>
+            <dd className="font-medium tabular-nums">{formatujKm(sumaKm(trasyDokumentu))}</dd>
           </div>
           <div>
             <dt className="text-slate-500">Podpis kierownika</dt>
@@ -641,7 +656,7 @@ export function Ewidencja({ logId, profil, naListe }: Props) {
 
       <div className="rounded-lg border border-slate-200 bg-white p-4">
         <TabelaTras
-          trasy={trasy}
+          trasy={trasyDokumentu}
           zablokowana={zablokowana}
           administrator={admin}
           zapisz={zapiszKomorke}
